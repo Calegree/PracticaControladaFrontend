@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #135bec;
+  --color-primary-hover: #1d6bf5;
+  --color-background-light: #f6f6f8;
+  --color-background-dark: #101622;
+  --color-surface-dark: #1a1d24;
+  --color-surface-dark-lighter: #232f48;
+  --color-card-dark: #1e293b;
+  --color-border-dark: #324467;
+  --color-text-secondary: #92a4c9;
+
+  /* Keep Gold Fields gold if needed */
+  --color-goldfields-gold: #c39a2d;
+
+  --font-display: "Inter", sans-serif;
+  --font-body: "Inter", sans-serif;
+}
+
+body {
+  @apply font-body bg-background-light text-slate-800 antialiased;
+}
+
+/* Scrollbar styles to match the legacy app */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background-light);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: var(--color-background-dark);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--color-border-dark);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475e85;
+}
