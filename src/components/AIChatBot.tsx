@@ -95,7 +95,7 @@ const AIChatBot = () => {
                     onClick={() => setIsOpen(true)}
                     className="bg-primary hover:bg-primary-hover text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 group"
                 >
-                    <span className="material-symbols-outlined text-3xl icon-fill">monitoring</span>
+                    <span className="material-symbols-outlined text-3xl icon-fill">smart_toy</span>
                 </button>
             )}
         </div>

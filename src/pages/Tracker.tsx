@@ -4,7 +4,7 @@ const Tracker = () => {
     const [search, setSearch] = useState('PERM-1042');
 
     const steps = [
-        { title: "Generación RFI", status: "completed", date: "12 Mar 2026", desc: "Información técnica base solicitada al área de ingeniería." },
+        { title: "Generación Request For Information", status: "completed", date: "12 Mar 2026", desc: "Información técnica base solicitada al área de ingeniería." },
         { title: "Revisión B", status: "completed", date: "28 Mar 2026", desc: "Borrador inicial elaborado y enviado a revisión interna." },
         { title: "Revisión 0", status: "current", date: "Estimado: 15 Abr", desc: "Corrección de observaciones para emisión de versión final." },
         { title: "Ingreso Autoridad", status: "pending", date: "--", desc: "Presentación de expediente a Sernageomin." },

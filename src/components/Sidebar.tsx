@@ -1,12 +1,15 @@
 import { NavLink } from 'react-router-dom';
+import { useState } from 'react';
 
 const Sidebar = () => {
     const links = [
         { to: "/", icon: "space_dashboard", label: "Dashboard" },
-        { to: "/tracker", icon: "route", label: "Ruta Permiso" },
+        { to: "/tracker", icon: "route", label: "Seguimiento Permisos" },
         { to: "/gantt", icon: "list_alt", label: "Planificación" },
         { to: "/commitments", icon: "assignment", label: "Compromisos" }
     ];
+
+    const [showLogout, setShowLogout] = useState(false);
 
     return (
         <div className="w-64 bg-background-dark h-full text-white flex flex-col transition-all duration-300 border-r border-border-dark">
@@ -47,12 +50,26 @@ const Sidebar = () => {
                         ES
                     </span>
                 </button>
-                <div className="flex items-center gap-3">
-                    <div className="size-10 rounded-full bg-cover bg-center shrink-0" style={{ backgroundImage: 'url("https://picsum.photos/seed/user/100/100")' }}></div>
-                    <div className="flex flex-col overflow-hidden">
-                        <p className="text-sm font-medium truncate text-white">Roberto Díaz</p>
-                        <p className="text-[10px] text-text-secondary truncate">Director de Medio Ambiente</p>
+                <div className="relative">
+                    <div
+                        className="flex items-center gap-3 cursor-pointer hover:bg-white/5 p-2 -mx-2 rounded-lg transition-colors"
+                        onClick={() => setShowLogout(!showLogout)}
+                    >
+                        <div className="size-10 rounded-full bg-cover bg-center shrink-0" style={{ backgroundImage: 'url("https://picsum.photos/seed/user/100/100")' }}></div>
+                        <div className="flex flex-col overflow-hidden">
+                            <p className="text-sm font-medium truncate text-white">Roberto Díaz</p>
+                            <p className="text-[10px] text-text-secondary truncate">Director de Medio Ambiente</p>
+                        </div>
                     </div>
+
+                    {showLogout && (
+                        <div className="absolute bottom-full left-0 mb-4 w-full bg-background-dark border border-border-dark rounded-xl shadow-xl overflow-hidden z-20 animate-in slide-in-from-bottom-2 duration-200">
+                            <button className="w-full text-left px-4 py-3 hover:bg-white/5 text-red-500 hover:text-red-400 text-xs font-bold uppercase tracking-wider flex items-center gap-3 transition-colors">
+                                <span className="material-symbols-outlined text-[18px]">logout</span>
+                                Cerrar Sesión
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
