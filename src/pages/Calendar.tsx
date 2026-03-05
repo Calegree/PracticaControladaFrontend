@@ -133,8 +133,8 @@ const Calendar = () => {
                                 key={cat}
                                 onClick={() => setFilterCat(cat)}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${filterCat === cat
-                                        ? cat === 'all' ? 'bg-primary text-white border-primary' : `${catStyle[cat as EventCategory].badge} border-transparent`
-                                        : 'text-text-secondary border-border-dark hover:text-white hover:border-white/20'
+                                    ? cat === 'all' ? 'bg-primary text-white border-primary' : `${catStyle[cat as EventCategory].badge} border-transparent`
+                                    : 'text-text-secondary border-border-dark hover:text-white hover:border-white/20'
                                     }`}
                             >
                                 {cat !== 'all' && <span className="material-symbols-outlined text-[12px]">{catStyle[cat as EventCategory].icon}</span>}
@@ -147,7 +147,7 @@ const Calendar = () => {
 
             <div className="px-4 md:px-8 py-4 grid grid-cols-1 xl:grid-cols-3 gap-6 pb-8">
                 {/* Calendar grid */}
-                <div className="xl:col-span-2 flex flex-col rounded-xl bg-surface-dark border border-border-dark shadow-sm overflow-hidden">
+                <div className="xl:col-span-2 flex flex-col rounded-xl bg-surface-dark border border-border-dark shadow-sm overflow-visible">
                     <div className="flex items-center justify-between p-4 border-b border-border-dark">
                         <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-white/5 text-text-secondary hover:text-white transition-colors">
                             <span className="material-symbols-outlined text-[20px]">chevron_left</span>
@@ -164,7 +164,7 @@ const Calendar = () => {
                         ))}
                     </div>
 
-                    <div className="grid grid-cols-7 flex-1">
+                    <div className="grid grid-cols-7 flex-1 overflow-visible">
                         {Array.from({ length: firstDay }).map((_, i) => (
                             <div key={`e-${i}`} className="min-h-[80px] border-b border-r border-border-dark/50 bg-background-dark/20" />
                         ))}
@@ -185,13 +185,34 @@ const Calendar = () => {
                                     </div>
                                     <div className="space-y-0.5">
                                         {dayEvents.slice(0, 2).map(ev => (
-                                            <div key={ev.id} className={`flex items-center gap-1 rounded px-1 py-0.5 ${catStyle[ev.category].badge}`}>
-                                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${catStyle[ev.category].dot}`} />
-                                                <span className="text-[8px] font-bold truncate">{ev.label}</span>
+                                            <div key={ev.id} className="relative group/tip">
+                                                {/* Pill */}
+                                                <div className={`flex items-center gap-1 rounded px-1 py-0.5 ${catStyle[ev.category].badge} cursor-default`}>
+                                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${catStyle[ev.category].dot}`} />
+                                                    <span className="text-sm font-bold truncate">{ev.label}</span>
+                                                </div>
+                                                {/* Tooltip */}
+                                                <div className="absolute bottom-full left-0 mb-2 z-[999] w-64 pointer-events-none
+                                                    opacity-0 group-hover/tip:opacity-100 translate-y-1 group-hover/tip:translate-y-0
+                                                    transition-all duration-150">
+                                                    <div className={`rounded-xl border shadow-2xl p-4 ${catStyle[ev.category].badge} bg-[#0f172a] backdrop-blur-sm`}>
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <span className="material-symbols-outlined icon-fill text-[18px]">{catStyle[ev.category].icon}</span>
+                                                            <span className="text-xs font-black uppercase tracking-widest opacity-80">{catLabel[ev.category]}</span>
+                                                        </div>
+                                                        <p className="text-sm font-black leading-snug">{ev.label}</p>
+                                                        <p className="text-xs opacity-70 mt-1.5 leading-snug">{ev.sub}</p>
+                                                        <p className="text-[11px] font-black mt-2.5 opacity-50">
+                                                            {new Date(ev.date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                                        </p>
+                                                    </div>
+                                                    {/* Arrow */}
+                                                    <div className={`w-2.5 h-2.5 rotate-45 border-b border-r ml-4 -mt-1.5 bg-[#0f172a] ${catStyle[ev.category].badge.split(' ').find(c => c.startsWith('border-'))}`} />
+                                                </div>
                                             </div>
                                         ))}
                                         {dayEvents.length > 2 && (
-                                            <p className="text-[8px] text-text-secondary pl-1">+{dayEvents.length - 2} más</p>
+                                            <p className="text-[10px] text-text-secondary pl-1">+{dayEvents.length - 2} más</p>
                                         )}
                                     </div>
                                 </div>
@@ -215,7 +236,7 @@ const Calendar = () => {
                         <div className="flex flex-col rounded-xl bg-surface-dark border border-primary/30 overflow-hidden">
                             <div className="p-4 border-b border-border-dark flex items-center gap-2">
                                 <span className="material-symbols-outlined text-primary text-[18px]">event</span>
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-white flex-1">
+                                <h4 className="text-sm font-black uppercase tracking-widest text-white flex-1">
                                     {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
                                 </h4>
                                 <button onClick={() => setSelectedDate(null)} className="text-text-secondary hover:text-white">
@@ -224,14 +245,14 @@ const Calendar = () => {
                             </div>
                             <div className="p-4 space-y-3">
                                 {selectedEvents.length === 0
-                                    ? <p className="text-xs text-text-secondary italic">Sin eventos este día.</p>
+                                    ? <p className="text-sm text-text-secondary italic">Sin eventos este día.</p>
                                     : selectedEvents.map(ev => (
                                         <div key={ev.id} className={`flex items-start gap-3 p-3 rounded-lg border ${catStyle[ev.category].badge}`}>
-                                            <span className="material-symbols-outlined icon-fill text-[20px] shrink-0 mt-0.5">{catStyle[ev.category].icon}</span>
+                                            <span className="material-symbols-outlined icon-fill text-[24px] shrink-0 mt-0.5">{catStyle[ev.category].icon}</span>
                                             <div>
-                                                <p className="text-xs font-black">{ev.label}</p>
-                                                <p className="text-[10px] opacity-70 mt-0.5">{ev.sub}</p>
-                                                <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">{catLabel[ev.category]}</span>
+                                                <p className="text-sm font-black">{ev.label}</p>
+                                                <p className="text-xs opacity-70 mt-0.5">{ev.sub}</p>
+                                                <span className="text-[11px] font-black uppercase opacity-60 tracking-widest">{catLabel[ev.category]}</span>
                                             </div>
                                         </div>
                                     ))
@@ -243,7 +264,7 @@ const Calendar = () => {
                     <div className="flex flex-col rounded-xl bg-surface-dark border border-border-dark overflow-hidden">
                         <div className="p-4 border-b border-border-dark flex items-center gap-2">
                             <span className="material-symbols-outlined text-primary text-[18px]">upcoming</span>
-                            <h4 className="text-[10px] font-black uppercase tracking-widest text-white">Próximos Hitos</h4>
+                            <h4 className="text-sm font-black uppercase tracking-widest text-white">Próximos Hitos</h4>
                         </div>
                         <div className="divide-y divide-border-dark">
                             {soon.length === 0
@@ -254,14 +275,14 @@ const Calendar = () => {
                                     const urgency = diffDays <= 7 ? 'text-red-400' : diffDays <= 30 ? 'text-yellow-400' : 'text-text-secondary';
                                     return (
                                         <div key={ev.id} className="flex items-start gap-3 p-3 hover:bg-white/3 transition-colors">
-                                            <span className={`w-2 h-2 rounded-full shrink-0 mt-1.5 ${catStyle[ev.category].dot}`} />
+                                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-2 ${catStyle[ev.category].dot}`} />
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-xs font-bold text-white truncate">{ev.label}</p>
-                                                <p className="text-[9px] text-text-secondary truncate">{ev.sub}</p>
+                                                <p className="text-sm font-bold text-white truncate">{ev.label}</p>
+                                                <p className="text-xs text-text-secondary truncate">{ev.sub}</p>
                                             </div>
                                             <div className="text-right shrink-0">
-                                                <p className="text-[9px] font-black text-white">{d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}</p>
-                                                <p className={`text-[9px] font-black ${urgency}`}>
+                                                <p className="text-xs font-black text-white">{d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}</p>
+                                                <p className={`text-xs font-black ${urgency}`}>
                                                     {diffDays === 0 ? 'Hoy' : diffDays < 0 ? `Hace ${Math.abs(diffDays)}d` : `en ${diffDays}d`}
                                                 </p>
                                             </div>
