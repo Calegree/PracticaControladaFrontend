@@ -6,7 +6,8 @@ const Sidebar = () => {
         { to: "/", icon: "space_dashboard", label: "Dashboard" },
         { to: "/tracker", icon: "route", label: "Seguimiento Permisos" },
         { to: "/gantt", icon: "list_alt", label: "Planificación" },
-        { to: "/commitments", icon: "assignment", label: "Compromisos" }
+        { to: "/commitments", icon: "assignment", label: "Compromisos" },
+        { to: "/calendar", icon: "calendar_month", label: "Calendario" },
     ];
 
     const [showLogout, setShowLogout] = useState(false);
