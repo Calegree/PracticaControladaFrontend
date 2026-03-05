@@ -90,9 +90,9 @@ const NewPermitModal = ({ onClose }: { onClose: () => void }) => {
                     {/* AI Banner */}
                     <div className="flex items-center gap-4 bg-yellow-500/5 border border-yellow-500/20 rounded-xl px-4 py-3">
                         <div className="flex items-center gap-2 flex-1">
-                            <span className="text-yellow-400 text-lg">🤖</span>
+                            <span className="material-symbols-outlined text-yellow-400 icon-fill text-[22px]">auto_awesome</span>
                             <div>
-                                <p className="text-xs font-bold text-yellow-400">Asistente IA</p>
+                                <p className="text-xs font-bold text-yellow-400">Auto-completar</p>
                                 <p className="text-[10px] text-text-secondary">
                                     {fileName ? `"${fileName}" listo para análisis` : 'Sube una RCA, Resolución o EIA para auto-completar este formulario.'}
                                 </p>
