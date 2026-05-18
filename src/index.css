@@ -52,3 +52,87 @@ body {
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #475e85;
 }
+
+/* ── Light mode: override custom color variables ──────────────────── */
+html:not(.dark) {
+  --color-background-dark: #f1f5f9;
+  --color-surface-dark: #ffffff;
+  --color-surface-dark-lighter: #e2e8f0;
+  --color-card-dark: #f8fafc;
+  --color-border-dark: #cbd5e1;
+  --color-text-secondary: #64748b;
+}
+
+/* text-white → dark text in light mode */
+html:not(.dark) .text-white {
+  color: #0f172a;
+}
+
+/* hover:text-white → dark text in light mode */
+html:not(.dark) *:hover .hover\:text-white,
+html:not(.dark) .hover\:text-white:hover {
+  color: #0f172a;
+}
+
+/* Subtle hover overlays that use white/opacity → use black/opacity in light mode */
+html:not(.dark) .hover\:bg-white\/5:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+html:not(.dark) .hover\:bg-white\/10:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ── Markdown Table Styles Premium ────────────────────────────────── */
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.75rem;
+  border: 1px solid var(--color-border-dark);
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.markdown-content th {
+  background-color: #1a2233;
+  color: #e2e8f0;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border-dark);
+  text-align: left;
+}
+
+.markdown-content td {
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+}
+
+.markdown-content tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.markdown-content tr:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Ajustes para modo claro */
+html:not(.dark) .markdown-content table {
+  background-color: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+html:not(.dark) .markdown-content th {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  border-color: #e2e8f0;
+}
+
+html:not(.dark) .markdown-content td {
+  color: #334155;
+  border-color: #f1f5f9;
+}
