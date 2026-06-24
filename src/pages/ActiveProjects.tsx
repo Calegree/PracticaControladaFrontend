@@ -1,9 +1,13 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchPermits } from '../services/permits';
 import type { ApiWBSItem } from '../services/permits';
 import type { PermitTramitacion, PermitEstado } from '../types/permit';
-import { apiFetch } from '../services/api';
+import { apiFetch, listObras, createObra, linkPermitToObra, deleteObra, createPermit } from '../services/api';
+import type { Obra } from '../services/api';
+import GenericDropdown from '../components/GenericDropdown';
+import PermitFields, { EMPTY_PERMIT } from '../components/PermitFields';
+import type { PermitFieldsValue } from '../components/PermitFields';
 
 const estadoStyles: Record<PermitEstado, string> = {
     'NO INICIADO':   'bg-slate-500/10 text-slate-400 border-slate-500/30',
@@ -22,45 +26,6 @@ const ESTADO_ORDER: Record<string, number> = {
     'APROBADO':       4,
 };
 
-// ─── Generic Dropdown ─────────────────────────────────────────────────────────
-
-const GenericDropdown = ({ label, value, options, onChange }: {
-    label: string; value: string; options: string[]; onChange: (v: string) => void
-}) => {
-    const [open, setOpen] = useState(false);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    return (
-        <div className="flex flex-col gap-1 relative" ref={containerRef}>
-            <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">{label}</label>
-            <button
-                type="button"
-                onClick={() => setOpen(o => !o)}
-                onBlur={(e) => { if (!containerRef.current?.contains(e.relatedTarget as Node)) setOpen(false); }}
-                className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none transition-all shadow-sm w-full flex items-center justify-between gap-2 hover:border-primary/60"
-            >
-                <span className="truncate">{value}</span>
-                <span className="material-symbols-outlined text-[14px] text-text-secondary">expand_more</span>
-            </button>
-            {open && (
-                <div className="absolute top-full left-0 mt-1 min-w-[200px] bg-[#1a1f2e] border border-border-dark rounded-xl shadow-2xl z-50 overflow-hidden max-h-[300px] overflow-y-auto">
-                    {options.map((opt) => (
-                        <button
-                            key={opt}
-                            type="button"
-                            className={`w-full text-left px-4 py-2.5 text-xs font-bold transition-colors
-                                ${value === opt ? 'bg-primary/20 text-primary' : 'text-white hover:bg-white/5'}`}
-                            onClick={() => { onChange(opt); setOpen(false); }}
-                        >
-                            {opt}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
-
 // ─── ActiveProjects ───────────────────────────────────────────────────────────
 
 type EstadoFilter = 'Todos' | 'CON_PARCIALES' | 'SIN_APROBADOS';
@@ -73,18 +38,134 @@ const ActiveProjects = () => {
     const [error, setError] = useState<string | null>(null);
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+    // Obras creadas manualmente sin permisos aún
+    const [obrasVacias, setObrasVacias] = useState<Obra[]>([]);
+    const [showCreateObra, setShowCreateObra] = useState(false);
+    const [nuevaObra, setNuevaObra] = useState({ nombre: '', gerencia: '', wbs_label: '' });
+    const [creandoObra, setCreandoObra] = useState(false);
+    const [crearMsg, setCrearMsg] = useState<string | null>(null);
+    // Crear permisos dentro de la obra (opcional, varios)
+    const [crearConPermiso, setCrearConPermiso] = useState(false);
+    const [permisosNuevos, setPermisosNuevos] = useState<PermitFieldsValue[]>([]);
+    // Modal "Agregar permiso" a una obra del listado
+    const [addPermitTo, setAddPermitTo] = useState<{ obra_actividad: string; gerencia?: string; wbs_label?: string } | null>(null);
+    const [addPermitValue, setAddPermitValue] = useState<PermitFieldsValue>(EMPTY_PERMIT);
+    const [addingPermit, setAddingPermit] = useState(false);
+    const [addPermitMsg, setAddPermitMsg] = useState<string | null>(null);
+    const [linkObra, setLinkObra] = useState<Obra | null>(null);
+    const [linkCodigo, setLinkCodigo] = useState('');
+    const [linkMsg, setLinkMsg] = useState<string | null>(null);
+
+    const refreshDatos = () => {
+        return Promise.all([fetchPermits(), listObras(true)])
+            .then(([p, obras]) => { setPermits(p); setObrasVacias(obras); });
+    };
+
     useEffect(() => {
         Promise.all([
             fetchPermits(),
             apiFetch<ApiWBSItem[]>('/wbs'),
+            listObras(true),
         ])
-            .then(([p, wbs]) => {
+            .then(([p, wbs, obras]) => {
                 setPermits(p);
                 setWbsOptions(wbs.map(i => i.nombre_wbs ?? i.wbs_name).sort());
+                setObrasVacias(obras);
             })
             .catch(e => setError(e.message))
             .finally(() => setLoading(false));
     }, []);
+
+    const resetCrearObra = () => {
+        setNuevaObra({ nombre: '', gerencia: '', wbs_label: '' });
+        setPermisosNuevos([]);
+        setCrearConPermiso(false);
+        setCrearMsg(null);
+    };
+
+    const permitPayload = (p: PermitFieldsValue, obra: { nombre: string; gerencia?: string; wbs_label?: string }) => ({
+        codigo_aconex: p.codigo_aconex.trim(),
+        obra_actividad: obra.nombre,
+        gerencia: obra.gerencia || undefined,
+        wbs_label: obra.wbs_label || undefined,
+        tipo_permiso: p.tipo_permiso.trim() || undefined,
+        permiso_aplicable: p.permiso_aplicable.trim() || undefined,
+        autoridad: p.autoridad || undefined,
+        contratista_responsable: p.contratista_responsable || undefined,
+        origen_permiso: p.origen_permiso || undefined,
+        estado: p.estado || undefined,
+        macrozona: p.macrozona.trim() || undefined,
+    });
+
+    const handleCreateObra = async () => {
+        if (!nuevaObra.nombre.trim()) return;
+        const permisos = crearConPermiso ? permisosNuevos.filter(p => p.codigo_aconex.trim()) : [];
+        if (crearConPermiso && permisosNuevos.length > 0 && permisos.length === 0) {
+            setCrearMsg('Cada permiso necesita un código Aconex.');
+            return;
+        }
+        setCreandoObra(true);
+        setCrearMsg(null);
+        try {
+            const obra = await createObra({
+                nombre: nuevaObra.nombre.trim(),
+                gerencia: nuevaObra.gerencia.trim() || undefined,
+                wbs_label: nuevaObra.wbs_label.trim() || undefined,
+            });
+            for (const p of permisos) {
+                await createPermit(permitPayload(p, { nombre: obra.nombre, gerencia: obra.gerencia ?? undefined, wbs_label: obra.wbs_label ?? undefined }));
+            }
+            await refreshDatos();
+            setShowCreateObra(false);
+            resetCrearObra();
+        } catch (e: unknown) {
+            setCrearMsg(e instanceof Error ? e.message : String(e));
+        } finally {
+            setCreandoObra(false);
+        }
+    };
+
+    const handleAddPermitToObra = async () => {
+        if (!addPermitTo) return;
+        if (!addPermitValue.codigo_aconex.trim()) {
+            setAddPermitMsg('El código Aconex es obligatorio.');
+            return;
+        }
+        setAddingPermit(true);
+        setAddPermitMsg(null);
+        try {
+            await createPermit(permitPayload(addPermitValue, { nombre: addPermitTo.obra_actividad, gerencia: addPermitTo.gerencia, wbs_label: addPermitTo.wbs_label }));
+            await refreshDatos();
+            setAddPermitTo(null);
+            setAddPermitValue(EMPTY_PERMIT);
+        } catch (e: unknown) {
+            setAddPermitMsg(e instanceof Error ? e.message : String(e));
+        } finally {
+            setAddingPermit(false);
+        }
+    };
+
+    const handleLinkPermit = async () => {
+        if (!linkObra || !linkCodigo.trim()) return;
+        setLinkMsg(null);
+        try {
+            await linkPermitToObra(linkObra.id, linkCodigo.trim());
+            await refreshDatos();
+            setLinkObra(null);
+            setLinkCodigo('');
+        } catch (e: unknown) {
+            setLinkMsg(e instanceof Error ? e.message : String(e));
+        }
+    };
+
+    const handleDeleteObra = async (id: number) => {
+        try {
+            await deleteObra(id);
+            setObrasVacias(prev => prev.filter(o => o.id !== id));
+        } catch (e) {
+            console.error('Error al eliminar obra', e);
+        }
+    };
 
     const [selectedGerencia, setSelectedGerencia] = useState('Todas');
     const [selectedWBS, setSelectedWBS] = useState('Todos');
@@ -220,12 +301,20 @@ const ActiveProjects = () => {
     return (
         <div className="flex-1 flex flex-col h-full bg-background-dark overflow-y-auto text-white pb-12">
             <header className="px-8 py-6 pb-4 border-b border-border-dark bg-background-dark sticky top-0 z-10">
-                <div className="flex items-center gap-3 mb-5">
-                    <span className="material-symbols-outlined text-[32px] text-primary">folder_open</span>
-                    <div>
-                        <h1 className="text-3xl font-black uppercase tracking-tight text-white">Obras y Actividades con Permisos Activos</h1>
-                        <p className="text-text-secondary text-xs uppercase tracking-widest mt-1">Seguimiento de obras y actividades con permisos en tramitación — en proceso y no iniciados.</p>
+                <div className="flex items-center justify-between gap-3 mb-5">
+                    <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined text-[32px] text-primary">folder_open</span>
+                        <div>
+                            <h1 className="text-3xl font-black uppercase tracking-tight text-white">Obras y Actividades con Permisos Activos</h1>
+                            <p className="text-text-secondary text-xs uppercase tracking-widest mt-1">Seguimiento de obras y actividades con permisos en tramitación — en proceso y no iniciados.</p>
+                        </div>
                     </div>
+                    <button
+                        onClick={() => { setShowCreateObra(true); setCrearMsg(null); }}
+                        className="shrink-0 flex items-center gap-2 bg-primary/20 hover:bg-primary/30 text-white border border-primary/30 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-[16px]">add_business</span> Crear obra
+                    </button>
                 </div>
 
                 {/* Filters */}
@@ -308,7 +397,35 @@ const ActiveProjects = () => {
 
                 {/* Acordeón agrupado por Obra/Actividad */}
                 <div className="flex flex-col gap-2">
-                    {groupedPermits.length === 0 && (
+                    {/* Obras creadas manualmente sin permisos aún */}
+                    {obrasVacias.map(obra => (
+                        <div key={`obra-${obra.id}`} className="bg-surface-dark border border-amber-500/30 rounded-xl px-5 py-4 flex items-center gap-3 shadow-sm">
+                            <span className="material-symbols-outlined text-[20px] text-amber-400">warning</span>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-white line-clamp-1">{obra.nombre}</p>
+                                <p className="text-[10px] text-amber-400/90 uppercase tracking-widest mt-0.5">
+                                    Sin permisos asignados todavía{obra.gerencia ? ` · ${obra.gerencia}` : ''}{obra.wbs_label ? ` · ${obra.wbs_label}` : ''}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => { setAddPermitTo({ obra_actividad: obra.nombre, gerencia: obra.gerencia ?? undefined, wbs_label: obra.wbs_label ?? undefined }); setAddPermitValue({ ...EMPTY_PERMIT }); setAddPermitMsg(null); }}
+                                className="shrink-0 flex items-center gap-1.5 bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-widest transition-colors"
+                            >
+                                <span className="material-symbols-outlined text-[15px]">add</span> Agregar permiso
+                            </button>
+                            <button
+                                onClick={() => { setLinkObra(obra); setLinkCodigo(''); setLinkMsg(null); }}
+                                className="shrink-0 flex items-center gap-1.5 bg-slate-700/40 hover:bg-slate-700/60 text-white border border-border-dark px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-widest transition-colors"
+                            >
+                                <span className="material-symbols-outlined text-[15px]">link</span> Enlazar
+                            </button>
+                            <button onClick={() => handleDeleteObra(obra.id)} title="Eliminar obra" className="shrink-0 p-1.5 rounded-lg hover:bg-white/5 text-text-secondary/60 hover:text-red-400 transition-colors">
+                                <span className="material-symbols-outlined text-[18px]">delete</span>
+                            </button>
+                        </div>
+                    ))}
+
+                    {groupedPermits.length === 0 && obrasVacias.length === 0 && (
                         <div className="bg-surface-dark border border-border-dark rounded-xl px-6 py-16 text-center text-text-secondary text-xs italic">
                             No se encontraron permisos con los filtros seleccionados.
                         </div>
@@ -373,7 +490,14 @@ const ActiveProjects = () => {
                                             </div>
                                         );
                                     })()}
-                                    {/* Gerencia is now moved before the bar — keep after */}
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setAddPermitTo({ obra_actividad: obraActividad, gerencia: first.gerencia, wbs_label: first.wbs }); setAddPermitValue({ ...EMPTY_PERMIT }); setAddPermitMsg(null); }}
+                                        title="Agregar permiso a esta obra"
+                                        className="shrink-0 flex items-center gap-1.5 bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors"
+                                    >
+                                        <span className="material-symbols-outlined text-[15px]">add</span> Permiso
+                                    </button>
                                 </div>
 
                                 {/* ── Expanded: permit rows ── */}
@@ -446,6 +570,136 @@ const ActiveProjects = () => {
                     })}
                 </div>
             </div>
+
+            {/* Modal: Crear obra */}
+            {showCreateObra && (() => {
+                const inputCls = "bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/60 placeholder:text-text-secondary/40 w-full";
+                const lblCls = "text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1";
+                const gerencias = gerenciaOptions.filter(g => g !== 'Todas');
+                const PH = '— Selecciona —';
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background-dark/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                        <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col animate-in zoom-in-95 duration-300">
+                            <div className="px-6 py-5 border-b border-border-dark flex items-center justify-between bg-slate-800/20 sticky top-0 z-10">
+                                <div className="flex items-center gap-3">
+                                    <span className="material-symbols-outlined text-primary text-[24px]">add_business</span>
+                                    <h2 className="text-[11px] font-black uppercase tracking-widest text-white">Crear nueva obra</h2>
+                                </div>
+                                <button onClick={() => { setShowCreateObra(false); resetCrearObra(); }} className="text-text-secondary hover:text-white transition-colors bg-background-dark/50 p-1.5 rounded-lg border border-border-dark hover:border-slate-600">
+                                    <span className="material-symbols-outlined text-[18px]">close</span>
+                                </button>
+                            </div>
+                            <div className="p-6 flex flex-col gap-4">
+                                <p className="text-xs text-text-secondary leading-relaxed">Define los atributos de la obra. Puede quedar <span className="text-white font-bold">sin permisos</span> (los enlazas luego), o crear ya <span className="text-white font-bold">uno o varios permisos</span> activando la opción de abajo.</p>
+
+                                <div className="flex flex-col gap-1.5">
+                                    <label className={lblCls}>Nombre de la obra *</label>
+                                    <input value={nuevaObra.nombre} onChange={e => setNuevaObra({ ...nuevaObra, nombre: e.target.value })} placeholder="Ej: BOTADERO DE ESTÉRILES NORTE (PAS 156 VP-0301-45)" className={inputCls} />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <GenericDropdown label="Gerencia" value={nuevaObra.gerencia || PH} options={[PH, ...gerencias]} onChange={v => setNuevaObra({ ...nuevaObra, gerencia: v === PH ? '' : v })} />
+                                    <GenericDropdown label="WBS o Área de Trabajo" value={nuevaObra.wbs_label || PH} options={[PH, ...wbsOptions]} onChange={v => setNuevaObra({ ...nuevaObra, wbs_label: v === PH ? '' : v })} />
+                                </div>
+
+                                {/* Opción: crear permisos dentro de la obra */}
+                                <label className="flex items-center gap-2.5 cursor-pointer bg-background-dark/50 border border-border-dark rounded-lg px-3 py-2.5 hover:border-primary/40 transition-colors">
+                                    <input type="checkbox" checked={crearConPermiso} onChange={e => { setCrearConPermiso(e.target.checked); if (e.target.checked && permisosNuevos.length === 0) setPermisosNuevos([{ ...EMPTY_PERMIT }]); }} className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-primary focus:ring-primary focus:ring-offset-background-dark" />
+                                    <span className="text-[11px] font-bold text-white">Crear permisos en esta obra</span>
+                                </label>
+
+                                {crearConPermiso && (
+                                    <div className="flex flex-col gap-3">
+                                        {permisosNuevos.map((p, i) => (
+                                            <div key={i} className="border border-primary/20 rounded-lg p-3 bg-background-dark/40 flex flex-col gap-2">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-primary/80">Permiso {i + 1} (hereda gerencia y WBS de la obra)</p>
+                                                    {permisosNuevos.length > 1 && (
+                                                        <button onClick={() => setPermisosNuevos(permisosNuevos.filter((_, j) => j !== i))} className="text-text-secondary/60 hover:text-red-400 transition-colors" title="Quitar permiso">
+                                                            <span className="material-symbols-outlined text-[16px]">delete</span>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <PermitFields value={p} onChange={v => setPermisosNuevos(permisosNuevos.map((x, j) => j === i ? v : x))} autoridadOptions={autoridadOptions} contratistaOptions={contratistaOptions} />
+                                            </div>
+                                        ))}
+                                        <button onClick={() => setPermisosNuevos([...permisosNuevos, { ...EMPTY_PERMIT }])} className="self-start flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-primary hover:text-primary/80 transition-colors">
+                                            <span className="material-symbols-outlined text-[15px]">add_circle</span> Agregar otro permiso
+                                        </button>
+                                    </div>
+                                )}
+
+                                {crearMsg && <p className="text-[11px] text-red-400">{crearMsg}</p>}
+                                <div className="flex gap-3 justify-end sticky bottom-0 bg-surface-dark pt-2">
+                                    <button onClick={() => { setShowCreateObra(false); resetCrearObra(); }} className="text-[11px] text-text-secondary border border-border-dark px-4 py-2.5 rounded-xl hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">Cancelar</button>
+                                    <button onClick={handleCreateObra} disabled={!nuevaObra.nombre.trim() || creandoObra} className="flex items-center gap-2 bg-primary/20 hover:bg-primary/30 disabled:opacity-50 disabled:cursor-not-allowed text-white border border-primary/30 px-5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors">
+                                        {creandoObra ? 'Creando...' : (crearConPermiso ? `Crear obra + ${permisosNuevos.filter(p => p.codigo_aconex.trim()).length} permiso(s)` : 'Crear obra')}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* Modal: Agregar permiso a una obra */}
+            {addPermitTo && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background-dark/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto flex flex-col animate-in zoom-in-95 duration-300">
+                        <div className="px-6 py-5 border-b border-border-dark flex items-center justify-between bg-slate-800/20 sticky top-0 z-10">
+                            <div className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-primary text-[24px]">add</span>
+                                <h2 className="text-[11px] font-black uppercase tracking-widest text-white">Agregar permiso</h2>
+                            </div>
+                            <button onClick={() => setAddPermitTo(null)} className="text-text-secondary hover:text-white transition-colors bg-background-dark/50 p-1.5 rounded-lg border border-border-dark hover:border-slate-600">
+                                <span className="material-symbols-outlined text-[18px]">close</span>
+                            </button>
+                        </div>
+                        <div className="p-6 flex flex-col gap-4">
+                            <p className="text-xs text-text-secondary leading-relaxed">Nuevo permiso en la obra <span className="text-white font-bold">{addPermitTo.obra_actividad}</span>. Hereda gerencia{addPermitTo.gerencia ? ` (${addPermitTo.gerencia})` : ''} y WBS{addPermitTo.wbs_label ? ` (${addPermitTo.wbs_label})` : ''} de la obra.</p>
+                            <PermitFields value={addPermitValue} onChange={setAddPermitValue} autoridadOptions={autoridadOptions} contratistaOptions={contratistaOptions} />
+                            {addPermitMsg && <p className="text-[11px] text-red-400">{addPermitMsg}</p>}
+                            <div className="flex gap-3 justify-end sticky bottom-0 bg-surface-dark pt-2">
+                                <button onClick={() => setAddPermitTo(null)} className="text-[11px] text-text-secondary border border-border-dark px-4 py-2.5 rounded-xl hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">Cancelar</button>
+                                <button onClick={handleAddPermitToObra} disabled={!addPermitValue.codigo_aconex.trim() || addingPermit} className="flex items-center gap-2 bg-primary/20 hover:bg-primary/30 disabled:opacity-50 disabled:cursor-not-allowed text-white border border-primary/30 px-5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors">
+                                    {addingPermit ? 'Agregando...' : 'Agregar permiso'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: Enlazar permiso a obra */}
+            {linkObra && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background-dark/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
+                        <div className="px-6 py-5 border-b border-border-dark flex items-center justify-between bg-slate-800/20">
+                            <div className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-primary text-[24px]">link</span>
+                                <h2 className="text-[11px] font-black uppercase tracking-widest text-white">Enlazar permiso</h2>
+                            </div>
+                            <button onClick={() => setLinkObra(null)} className="text-text-secondary hover:text-white transition-colors bg-background-dark/50 p-1.5 rounded-lg border border-border-dark hover:border-slate-600">
+                                <span className="material-symbols-outlined text-[18px]">close</span>
+                            </button>
+                        </div>
+                        <div className="p-6 flex flex-col gap-4">
+                            <p className="text-xs text-text-secondary leading-relaxed">Enlazar un permiso a la obra <span className="text-white font-bold">{linkObra.nombre}</span>. El permiso quedará asignado a esta obra y aparecerá agrupado bajo ella.</p>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Código Aconex del permiso</label>
+                                <input value={linkCodigo} onChange={e => { setLinkCodigo(e.target.value); setLinkMsg(null); }} list="permit-codes-list" placeholder="Escribe o selecciona un código..." className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/60 placeholder:text-text-secondary/40 font-mono" />
+                                <datalist id="permit-codes-list">{permits.map(p => <option key={p.codigoAconex} value={p.codigoAconex}>{p.obraActividad}</option>)}</datalist>
+                            </div>
+                            {linkMsg && <p className="text-[11px] text-red-400">{linkMsg}</p>}
+                            <div className="flex gap-3 justify-end">
+                                <button onClick={() => setLinkObra(null)} className="text-[11px] text-text-secondary border border-border-dark px-4 py-2.5 rounded-xl hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">Cancelar</button>
+                                <button onClick={handleLinkPermit} disabled={!linkCodigo.trim()} className="flex items-center gap-2 bg-primary/20 hover:bg-primary/30 disabled:opacity-50 disabled:cursor-not-allowed text-white border border-primary/30 px-5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors">
+                                    <span className="material-symbols-outlined text-[15px]">link</span> Enlazar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

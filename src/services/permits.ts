@@ -125,6 +125,7 @@ function basePermit(p: ApiPermitListItem): PermitTramitacion {
         gerencia: p.gerencia ?? undefined,
         wbs: p.wbs_item?.nombre_wbs ?? p.wbs_item?.wbs_name ?? undefined,
         wbsGroupName: p.wbs_item?.wbs_name ?? undefined,
+        wbsId: p.wbs_id ?? null,
         estado: toEstado(p.estado),
         resolucionAprobacion: p.resolucion_aprobacion,
         // Milestones — populated as empty for list items, real data for detail

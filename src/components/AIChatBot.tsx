@@ -7,7 +7,7 @@ import autoTable from 'jspdf-autotable';
 const AIChatBot = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-        { role: 'model', text: '¡Hola! Soy tu Asistente de PMO Inteligente. Puedo enrutar tu consulta automáticamente al agente más experto (Cumplimiento, Consultor, Medioambiente, Reliability, Riesgos o RSA), o puedes seleccionar uno manualmente en el menú de arriba. ¿En qué te puedo ayudar hoy?' }
+        { role: 'model', text: '¡Hola! Soy tu Asistente PMO Inteligente. Puedo enrutar tu consulta automáticamente al agente más experto (PMO, Consultor TI, RSE, Mantenimiento o Calidad Documental), o puedes seleccionar uno manualmente en el menú de arriba. ¿En qué te puedo ayudar hoy?' }
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -78,16 +78,10 @@ const AIChatBot = () => {
         setInput('');
         setIsLoading(true);
 
-        const agentMap: Record<string, string> = {
-            'auto': 'auto',
-            'cumplimiento': 'compliance',
-            'consultor': 'consulting-expert',
-            'medioambiente': 'environment',
-            'reliability': 'reliability',
-            'riesgos': 'risk-analyst',
-            'rsa': 'rsa'
-        };
-        const backendAgentId = agentMap[selectedAgent] || 'auto';
+        // Los 5 IDs deben coincidir EXACTAMENTE con los del yaml_registry/skills_registry.yaml
+        // 'auto' no es un agente: indica al backend que use el router por keywords (default PMO).
+        const VALID_AGENTS = new Set(['auto', 'pmo', 'hse', 'confiabilidad', 'consultor-estrategico', 'quality-agent']);
+        const backendAgentId = VALID_AGENTS.has(selectedAgent) ? selectedAgent : 'auto';
 
         try {
             const agentsBase = import.meta.env.VITE_AGENTS_URL || '/agents';
@@ -104,8 +98,11 @@ const AIChatBot = () => {
             const data = await response.json();
             const activeAgent = data.activeAgent || 'Agente';
             const responseText = data.finalReport || 'Sin respuesta.';
+            const modelo = data.modelo as string | undefined;
+            const proveedor = data.proveedor as string | undefined;
+            const modeloLabel = modelo ? ` · 🧠 ${proveedor ? proveedor + '/' : ''}${modelo}` : '';
 
-            setMessages(prev => [...prev, { role: 'model', text: `*[Respondiendo desde ${activeAgent}]*\n\n${responseText}` }]);
+            setMessages(prev => [...prev, { role: 'model', text: `*[Respondiendo desde ${activeAgent}${modeloLabel}]*\n\n${responseText}` }]);
         } catch (error) {
             console.error('Error en Chatbot:', error);
             setMessages(prev => [...prev, { role: 'model', text: 'Lo siento, hubo un error de comunicación con el microservicio de agentes.' }]);
@@ -132,12 +129,11 @@ const AIChatBot = () => {
                                     className="bg-black/20 text-white text-xs rounded py-1 px-2 outline-none font-medium cursor-pointer border border-white/20 hover:bg-black/30 transition-colors focus:ring-1 focus:ring-white/50"
                                 >
                                     <option value="auto" className="bg-surface-dark text-white">Automático (Mejor Agente)</option>
-                                    <option value="cumplimiento" className="bg-surface-dark text-white">Agente de Cumplimiento</option>
-                                    <option value="consultor" className="bg-surface-dark text-white">Agente Consultor</option>
-                                    <option value="medioambiente" className="bg-surface-dark text-white">Agente de Medioambiente</option>
-                                    <option value="reliability" className="bg-surface-dark text-white">Agente de Reliability</option>
-                                    <option value="riesgos" className="bg-surface-dark text-white">Agente de Riesgos</option>
-                                    <option value="rsa" className="bg-surface-dark text-white">Agente de Análisis RSA</option>
+                                    <option value="pmo" className="bg-surface-dark text-white">Agente PMO</option>
+                                    <option value="hse" className="bg-surface-dark text-white">Agente HSE</option>
+                                    <option value="confiabilidad" className="bg-surface-dark text-white">Agente de Confiabilidad</option>
+                                    <option value="consultor-estrategico" className="bg-surface-dark text-white">Agente Consultor Estratégico</option>
+                                    <option value="quality-agent" className="bg-surface-dark text-white">Agente de Calidad Documental</option>
                                 </select>
                             </div>
                         </div>

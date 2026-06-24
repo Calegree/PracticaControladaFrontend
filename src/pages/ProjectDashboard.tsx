@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchPermitDetail, fetchPermits } from '../services/permits';
 import type { ApiPermitDetail } from '../services/permits';
-import { apiFetch, fetchObraActivitySummary, fetchDocumentos, triggerDocumentExtraction, saveDocumentos, sendNotificationEmail } from '../services/api';
-import type { ObraActivitySummary, Documento, DocAnalysisResult } from '../services/api';
+import { apiFetch, fetchObraActivitySummary, fetchDocumentos, triggerDocumentExtraction, saveDocumentos, sendNotificationEmail, validateDocumentQuality, listObraDocuments, analyzeObraDocument, uploadObraDocument, obraDocumentDownloadUrl, deleteObraDocument, createDocumento, updateDocumento, deleteDocumento } from '../services/api';
+import type { ObraActivitySummary, Documento, DocAnalysisResult, QualityVerdict, ObraDocumento, ObraUploadResult, ObraAnalyzeResult } from '../services/api';
 import type { PermitTramitacion, PermitEstado, MilestoneDates } from '../types/permit';
 
 // ─── Milestone status helpers ─────────────────────────────────────────────────
@@ -99,6 +99,14 @@ const ProjectDashboard = () => {
 
     // Other modals state
     const [showDownloads, setShowDownloads] = useState(false);
+    // Centro de documentos de la obra (subida + validación IA + R2)
+    const [obraDocs, setObraDocs] = useState<ObraDocumento[]>([]);
+    const [obraDocsLoading, setObraDocsLoading] = useState(false);
+    const [uploadFile, setUploadFile] = useState<File | null>(null);
+    const [uploadCategoria, setUploadCategoria] = useState('OTRO');
+    const [uploadStep, setUploadStep] = useState<'idle' | 'analyzing' | 'analyzed' | 'uploading' | 'result'>('idle');
+    const [uploadResult, setUploadResult] = useState<ObraUploadResult | null>(null);
+    const [analyzeResult, setAnalyzeResult] = useState<ObraAnalyzeResult | null>(null);
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifEmail, setNotifEmail] = useState('');
     const [notifAlertasVenc, setNotifAlertasVenc] = useState(true);
@@ -109,14 +117,24 @@ const ProjectDashboard = () => {
 
     // Milestone expansion
     const [expandedMilestoneIdx, setExpandedMilestoneIdx] = useState<number | null>(null);
+    // Alta de documento requerido por hito
+    const [addDocMilestone, setAddDocMilestone] = useState<number | null>(null);
+    const emptyNewDoc = { nombre_documento: '', nombre_responsable: '', correo_responsable: '', fecha_entrega: '' };
+    const [newDoc, setNewDoc] = useState(emptyNewDoc);
+    const [savingDoc, setSavingDoc] = useState(false);
+    const [docActionId, setDocActionId] = useState<number | null>(null);
 
     // Documents state
     const [documents, setDocuments] = useState<Documento[]>([]);
     const [docFile, setDocFile] = useState<File | null>(null);
-    const [docStep, setDocStep] = useState<'upload' | 'analyzing' | 'review' | 'saving' | 'done'>('upload');
+    const [docStep, setDocStep] = useState<'upload' | 'analyzing' | 'review' | 'saving' | 'done' | 'validating' | 'verdict'>('upload');
     const [docAnalysis, setDocAnalysis] = useState<DocAnalysisResult | null>(null);
     const [docTargetPermitId, setDocTargetPermitId] = useState<number | null>(null);
     const [docSaveMsg, setDocSaveMsg] = useState<string | null>(null);
+
+    // Quality validation (sub-producto 2 — agente de calidad documental con RAG)
+    const [qualityVerdict, setQualityVerdict] = useState<QualityVerdict | null>(null);
+    const [validateTargetDocId, setValidateTargetDocId] = useState<number | null>(null);
 
     // Permit selector state
     const [siblingPermits, setSiblingPermits] = useState<PermitTramitacion[]>([]);
@@ -221,84 +239,153 @@ const ProjectDashboard = () => {
         }
     };
 
+    const handleValidateQuality = async () => {
+        if (!docFile || !permit) return;
+        if (permit.wbsId == null) {
+            setQualityVerdict({ veredicto: 'INDETERMINADO', observaciones: 'Este permiso no tiene un WBS asociado, así que no hay RCA indexada contra la cual validar.' });
+            setDocStep('verdict');
+            return;
+        }
+        setDocStep('validating');
+        setQualityVerdict(null);
+        try {
+            const verdict = await validateDocumentQuality(
+                docFile,
+                permit.wbsId,
+                validateTargetDocId ?? undefined,
+            );
+            setQualityVerdict(verdict);
+            setDocStep('verdict');
+        } catch (e: unknown) {
+            setQualityVerdict({ veredicto: 'INDETERMINADO', observaciones: `Error al validar: ${e instanceof Error ? e.message : String(e)}` });
+            setDocStep('verdict');
+        }
+    };
+
     const resetDocModal = () => {
         setDocFile(null);
         setDocStep('upload');
         setDocAnalysis(null);
         setDocTargetPermitId(null);
         setDocSaveMsg(null);
+        setQualityVerdict(null);
+        setValidateTargetDocId(null);
+    };
+
+    // Cargar documentos de la obra al abrir el centro de documentos
+    useEffect(() => {
+        if (!showDownloads || !permit?.id) return;
+        setObraDocsLoading(true);
+        listObraDocuments(permit.id)
+            .then(setObraDocs)
+            .catch(() => setObraDocs([]))
+            .finally(() => setObraDocsLoading(false));
+    }, [showDownloads, permit?.id]);
+
+    const handleAnalyzeObraDoc = async () => {
+        if (!uploadFile || !permit?.id) return;
+        setUploadStep('analyzing');
+        setAnalyzeResult(null);
+        try {
+            const result = await analyzeObraDocument(uploadFile, permit.id);
+            setAnalyzeResult(result);
+            setUploadStep('analyzed');
+        } catch (e: unknown) {
+            setAnalyzeResult({ resultado: 'DUDOSA', mensaje: e instanceof Error ? e.message : String(e), como_solucionar: '' });
+            setUploadStep('analyzed');
+        }
+    };
+
+    const handleUploadObraDoc = async () => {
+        if (!uploadFile || !permit?.id) return;
+        setUploadStep('uploading');
+        setUploadResult(null);
+        try {
+            const result = await uploadObraDocument(uploadFile, permit.id, uploadCategoria);
+            setUploadResult(result);
+            setUploadStep('result');
+            if (result.aprobado) {
+                const updated = await listObraDocuments(permit.id);
+                setObraDocs(updated);
+            }
+        } catch (e: unknown) {
+            setUploadResult({ aprobado: false, veredicto: 'ERROR', observaciones: e instanceof Error ? e.message : String(e) });
+            setUploadStep('result');
+        }
+    };
+
+    const resetUpload = () => {
+        setUploadFile(null);
+        setUploadCategoria('OTRO');
+        setUploadStep('idle');
+        setUploadResult(null);
+        setAnalyzeResult(null);
+    };
+
+    const handleDeleteObraDoc = async (docId: number) => {
+        try {
+            await deleteObraDocument(docId);
+            setObraDocs(prev => prev.filter(d => d.id !== docId));
+        } catch (e) {
+            console.error('Error al eliminar documento', e);
+        }
+    };
+
+    const refreshDocs = async () => {
+        if (!permit?.id) return;
+        const updated = await fetchDocumentos(permit.id);
+        setDocuments(updated);
+    };
+
+    const handleAddDoc = async (milestoneOrder: number) => {
+        if (!permit?.id || !newDoc.nombre_documento.trim()) return;
+        setSavingDoc(true);
+        try {
+            await createDocumento({
+                permit_id: permit.id,
+                milestone_order: milestoneOrder,
+                nombre_documento: newDoc.nombre_documento.trim(),
+                nombre_responsable: newDoc.nombre_responsable.trim() || null,
+                correo_responsable: newDoc.correo_responsable.trim() || null,
+                fecha_entrega: newDoc.fecha_entrega || null,
+            });
+            await refreshDocs();
+            setNewDoc(emptyNewDoc);
+            setAddDocMilestone(null);
+        } catch (e) {
+            console.error('Error al añadir documento', e);
+        } finally {
+            setSavingDoc(false);
+        }
+    };
+
+    const handleToggleDelivered = async (docId: number, entregado: boolean) => {
+        setDocActionId(docId);
+        try {
+            // Al marcar entregado: subido=true y se limpia el atraso. Al desmarcar: vuelve a pendiente.
+            await updateDocumento(docId, entregado ? { subido: true, dias_atraso: 0 } : { subido: false });
+            await refreshDocs();
+        } catch (e) {
+            console.error('Error al actualizar documento', e);
+        } finally {
+            setDocActionId(null);
+        }
+    };
+
+    const handleDeleteDoc = async (docId: number) => {
+        setDocActionId(docId);
+        try {
+            await deleteDocumento(docId);
+            await refreshDocs();
+        } catch (e) {
+            console.error('Error al eliminar documento', e);
+        } finally {
+            setDocActionId(null);
+        }
     };
 
     const projectName = permit?.obraActividad ?? 'Cargando...';
 
-    // ─── Gantt chart phases from forecast dates ─────────────────────────────────
-    const ganttPhases = (() => {
-        if (!permit) return [];
-
-        const PHASE_DEFS: { label: string; sub: string; color: string; startKey: keyof PermitTramitacion; endKey: keyof PermitTramitacion }[] = [
-            { label: 'Recopilación Info', sub: 'Legal e Ingeniería', color: 'bg-blue-500', startKey: 'solicitudInfoLegal', endKey: 'entregaInformacion' },
-            { label: 'Elaboración Expediente', sub: 'Contratista', color: 'bg-amber-500', startKey: 'inicioElaboracion', endKey: 'terminoElaboracion' },
-            { label: 'Revisión GF', sub: 'Asesor / IC', color: 'bg-purple-500', startKey: 'inicioRevisionGF', endKey: 'terminoRevisionGF' },
-            { label: 'Corrección Obs.', sub: 'Contratista', color: 'bg-orange-500', startKey: 'inicioCorreccionObs', endKey: 'terminoCorreccionObs' },
-            { label: 'Firma RL', sub: 'Representante Legal', color: 'bg-cyan-500', startKey: 'inicioRevision0', endKey: 'terminoRevision0' },
-            { label: 'Ingreso Autoridad', sub: 'Tramitación', color: 'bg-green-500', startKey: 'ingresoAutoridad', endKey: 'aprobacion' },
-        ];
-
-        const pickDate = (ms: MilestoneDates): Date | null => {
-            return parseDisplayDate(ms.forecast) ?? parseDisplayDate(ms.plan) ?? parseDisplayDate(ms.actual);
-        };
-
-        return PHASE_DEFS.map(ph => {
-            const startMs = permit[ph.startKey] as MilestoneDates;
-            const endMs = permit[ph.endKey] as MilestoneDates;
-            const start = pickDate(startMs);
-            const end = pickDate(endMs);
-            return { ...ph, start, end };
-        }).filter(ph => ph.start || ph.end);
-    })();
-
-    // Compute global date range for Gantt positioning
-    const ganttRange = (() => {
-        const allDates = ganttPhases.flatMap(ph => [ph.start, ph.end]).filter((d): d is Date => d !== null);
-        if (allDates.length === 0) return null;
-        const min = new Date(Math.min(...allDates.map(d => d.getTime())));
-        const max = new Date(Math.max(...allDates.map(d => d.getTime())));
-        // Add 5% padding on each side
-        const span = max.getTime() - min.getTime();
-        const pad = Math.max(span * 0.05, 7 * 86400000); // at least 1 week
-        return {
-            start: new Date(min.getTime() - pad),
-            end: new Date(max.getTime() + pad),
-            span: max.getTime() - min.getTime() + 2 * pad,
-        };
-    })();
-
-    const ganttPos = (d: Date) => {
-        if (!ganttRange) return 0;
-        return ((d.getTime() - ganttRange.start.getTime()) / ganttRange.span) * 100;
-    };
-
-    // Generate month labels for Gantt header
-    const ganttMonthLabels = (() => {
-        if (!ganttRange) return [];
-        const labels: { label: string; left: number; width: number }[] = [];
-        const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-        const cur = new Date(ganttRange.start.getFullYear(), ganttRange.start.getMonth(), 1);
-        const endTime = ganttRange.end.getTime();
-        while (cur.getTime() < endTime) {
-            const monthStart = Math.max(cur.getTime(), ganttRange.start.getTime());
-            const nextMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-            const monthEnd = Math.min(nextMonth.getTime(), ganttRange.end.getTime());
-            const left = ((monthStart - ganttRange.start.getTime()) / ganttRange.span) * 100;
-            const width = ((monthEnd - monthStart) / ganttRange.span) * 100;
-            labels.push({ label: `${MONTH_NAMES[cur.getMonth()]} ${cur.getFullYear()}`, left, width });
-            cur.setMonth(cur.getMonth() + 1);
-        }
-        return labels;
-    })();
-
-    const todayPos = ganttRange ? ganttPos(new Date()) : null;
-    const todayInRange = todayPos !== null && todayPos >= 0 && todayPos <= 100;
 
     // RCA donut data
     const rcaTotal      = obraSummary?.rca.total      ?? 0;
@@ -840,6 +927,7 @@ const ProjectDashboard = () => {
                                                 const cfg = STATUS_CONFIG[status];
                                                 const milestoneOrder = MILESTONE_ORDER_MAP[key] ?? 0;
                                                 const mileDocs = milestoneOrder > 0 ? docsByMilestone(milestoneOrder) : [];
+                                                const canExpand = milestoneOrder > 0;
                                                 const mock = mileDocs.length > 0 ? mileDocs : null;
                                                 const isExpanded = expandedMilestoneIdx === idx;
                                                 const maxDelay = mileDocs.length > 0 ? Math.max(...mileDocs.map(d => d.dias_atraso)) : 0;
@@ -868,8 +956,8 @@ const ProjectDashboard = () => {
                                                     <Fragment key={key}>
                                                         {/* Hito row — clickable if it has docs */}
                                                         <tr
-                                                            className={`transition-colors border-b border-border-dark ${mock ? 'cursor-pointer hover:bg-slate-800/30' : 'hover:bg-slate-800/20'} ${isExpanded ? 'bg-slate-800/20' : ''}`}
-                                                            onClick={() => mock && setExpandedMilestoneIdx(isExpanded ? null : idx)}
+                                                            className={`transition-colors border-b border-border-dark ${canExpand ? 'cursor-pointer hover:bg-slate-800/30' : 'hover:bg-slate-800/20'} ${isExpanded ? 'bg-slate-800/20' : ''}`}
+                                                            onClick={() => canExpand && setExpandedMilestoneIdx(isExpanded ? null : idx)}
                                                         >
                                                             <td className="px-5 py-4 w-[35%]">
                                                                 <div className="flex items-center gap-2 relative group w-fit">
@@ -881,6 +969,11 @@ const ProjectDashboard = () => {
                                                                     <span className={`${cfg.labelColor} text-[11px] cursor-help`}>{label}</span>
                                                                     {mock && maxDelay > 0 && (
                                                                         <span className={`material-symbols-outlined text-[13px] ${maxDelay > 7 ? 'text-red-500' : 'text-orange-500'}`}>warning</span>
+                                                                    )}
+                                                                    {total > 0 && (
+                                                                        <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border whitespace-nowrap ${pct === 100 ? 'bg-green-500/10 border-green-500/30 text-green-400' : maxDelay > 0 ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 'bg-slate-500/10 border-slate-500/30 text-slate-400'}`}>
+                                                                            {ready}/{total} docs
+                                                                        </span>
                                                                     )}
                                                                     <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 bg-slate-800 text-white text-[10px] p-2.5 rounded-lg shadow-xl border border-border-dark z-50">
                                                                         {tooltip}
@@ -896,7 +989,7 @@ const ProjectDashboard = () => {
                                                                 </div>
                                                             </td>
                                                             <td className="px-3 py-4 text-center w-10">
-                                                                {mock && (
+                                                                {canExpand && (
                                                                     <span className={`material-symbols-outlined text-[18px] text-text-secondary/60 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
                                                                         chevron_right
                                                                     </span>
@@ -905,7 +998,7 @@ const ProjectDashboard = () => {
                                                         </tr>
 
                                                         {/* Inline expanded doc panel */}
-                                                        {mock && isExpanded && (
+                                                        {canExpand && isExpanded && (
                                                             <tr className="bg-[#0d1220]">
                                                                 <td colSpan={5} className="px-5 py-4 border-b border-border-dark">
                                                                     <div className={`rounded-xl border overflow-hidden ${alertCfg ? alertCfg.bg : 'bg-blue-950/20 border-blue-500/20'}`}>
@@ -967,9 +1060,28 @@ const ProjectDashboard = () => {
                                                                                                 <span className="text-[9px] font-black uppercase tracking-wider">Notificar</span>
                                                                                             </a>
                                                                                         )}
+                                                                                        {doc.subido ? (
+                                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleDelivered(doc.id, false); }} disabled={docActionId === doc.id} className="flex items-center gap-1 text-text-secondary/70 hover:text-white border border-border-dark px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-colors disabled:opacity-50" title="Deshacer entrega">
+                                                                                                <span className="material-symbols-outlined text-[12px]">undo</span>
+                                                                                            </button>
+                                                                                        ) : (
+                                                                                            <button onClick={(e) => { e.stopPropagation(); handleToggleDelivered(doc.id, true); }} disabled={docActionId === doc.id} className="flex items-center gap-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-colors disabled:opacity-50">
+                                                                                                <span className="material-symbols-outlined text-[12px]">task_alt</span> Marcar entregado
+                                                                                            </button>
+                                                                                        )}
+                                                                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }} disabled={docActionId === doc.id} title="Eliminar documento" className="p-1 rounded-md hover:bg-white/5 text-text-secondary/50 hover:text-red-400 transition-colors disabled:opacity-50">
+                                                                                            <span className="material-symbols-outlined text-[14px]">delete</span>
+                                                                                        </button>
                                                                                     </div>
                                                                                 </div>
                                                                             ))}
+                                                                            {mileDocs.length === 0 && (
+                                                                                <p className="text-[10px] text-text-secondary/60 italic px-1 py-2">Aún no hay documentos requeridos en este hito. Añade el primero.</p>
+                                                                            )}
+                                                                            {/* Alta de documento requerido (abre modal) */}
+                                                                            <button onClick={(e) => { e.stopPropagation(); setAddDocMilestone(milestoneOrder); setNewDoc(emptyNewDoc); }} className="self-start flex items-center gap-1.5 mt-1 text-[10px] font-black uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors">
+                                                                                <span className="material-symbols-outlined text-[15px]">add_circle</span> Añadir documento requerido
+                                                                            </button>
                                                                         </div>
                                                                         {/* Progress bar */}
                                                                         <div className="px-4 pb-3 pt-1">
@@ -1014,83 +1126,6 @@ const ProjectDashboard = () => {
 
                     </div>
 
-                    {/* BOTTOM SECTION: Carta Gantt */}
-                    <div className="bg-surface-dark p-6 md:p-8 rounded-xl shadow-sm border border-border-dark flex flex-col relative overflow-x-auto w-full">
-                        <div className="flex items-center gap-3 mb-8">
-                            <span className="material-symbols-outlined text-[24px] text-primary">view_timeline</span>
-                            <div>
-                                <h2 className="text-sm font-black uppercase tracking-widest text-white">Carta Gantt del Proyecto {projectName}</h2>
-                                <p className="text-[10px] text-text-secondary mt-1 max-w-lg font-medium">
-                                    Cronograma de tramitación de los {totalPermisos} permisos asociados a este proyecto.
-                                </p>
-                            </div>
-                        </div>
-
-                        {ganttPhases.length > 0 && ganttRange ? (
-                        <div className="min-w-[800px]">
-                            {/* Header — dynamic month labels */}
-                            <div className="flex items-center border-b border-border-dark pb-3 mb-5 gap-6">
-                                <div className="w-[22%] text-[9px] font-black uppercase tracking-widest text-text-secondary">Fase / Tarea</div>
-                                <div className="flex-1 relative h-4">
-                                    {ganttMonthLabels.map((m, i) => (
-                                        <div key={i} className="absolute text-[9px] font-black uppercase tracking-widest text-text-secondary text-center" style={{ left: `${m.left}%`, width: `${m.width}%` }}>
-                                            {m.width > 4 ? m.label : ''}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Rows */}
-                            <div className="flex flex-col gap-5 relative">
-                                {/* Background grid — one line per month boundary */}
-                                <div className="absolute inset-0 flex gap-6 pointer-events-none">
-                                    <div className="w-[22%]"></div>
-                                    <div className="flex-1 relative">
-                                        {ganttMonthLabels.map((m, i) => i > 0 && (
-                                            <div key={i} className="absolute top-0 h-full w-px bg-border-dark/30" style={{ left: `${m.left}%` }} />
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {ganttPhases.map((row, idx) => {
-                                    const start = row.start ?? row.end!;
-                                    const end = row.end ?? row.start!;
-                                    const left = ganttPos(start);
-                                    const width = Math.max(ganttPos(end) - ganttPos(start), 1.5);
-                                    return (
-                                        <div key={idx} className="flex items-center gap-6 relative z-10 group">
-                                            <div className="w-[22%] flex flex-col justify-center shrink-0">
-                                                <span className="text-xs font-bold text-white group-hover:text-primary transition-colors">{row.label}</span>
-                                                <span className="text-[9px] text-text-secondary mt-0.5">{row.sub}</span>
-                                            </div>
-                                            <div className="flex-1 relative h-7 bg-background-dark/40 rounded-md shadow-inner">
-                                                <div
-                                                    className={`absolute h-full ${row.color} rounded-md opacity-75 hover:opacity-100 transition-opacity flex items-center px-2.5`}
-                                                    style={{ left: `${left}%`, width: `${width}%` }}
-                                                >
-                                                    <span className="text-[9px] font-bold text-white whitespace-nowrap overflow-hidden text-ellipsis">{row.label}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-
-                                {/* "Hoy" marker — positioned dynamically within the timeline area */}
-                                {todayInRange && (
-                                    <div className="absolute top-0 bottom-0 pointer-events-none z-30" style={{ left: `calc(22% + 24px + (100% - 22% - 24px) * ${todayPos! / 100})` }}>
-                                        <div className="h-full w-px bg-white/30 relative">
-                                            <span className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-700 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded-full whitespace-nowrap">Hoy</span>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        ) : (
-                        <div className="flex items-center justify-center h-32 text-text-secondary text-sm">
-                            No hay fechas de forecast disponibles para generar la carta Gantt.
-                        </div>
-                        )}
-                    </div>
 
                     {/* LAST SECTION: Descargas y Notificaciones */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
@@ -1170,6 +1205,35 @@ const ProjectDashboard = () => {
                                     >
                                         <span className="material-symbols-outlined text-[16px]">auto_awesome</span> Analizar con IA
                                     </button>
+
+                                    {/* Validación de calidad documental (sub-producto 2 — RAG) */}
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex-1 h-px bg-border-dark" />
+                                        <span className="text-[10px] uppercase tracking-widest text-text-secondary/60">o valida su calidad contra la RCA</span>
+                                        <div className="flex-1 h-px bg-border-dark" />
+                                    </div>
+                                    {documents.length > 0 && (
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-[10px] text-text-secondary uppercase tracking-widest">Asociar a un documento (opcional — guarda el veredicto y notifica al responsable):</label>
+                                            <select
+                                                className="bg-background-dark border border-border-dark text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-emerald-500/60"
+                                                value={validateTargetDocId ?? ''}
+                                                onChange={e => setValidateTargetDocId(e.target.value ? Number(e.target.value) : null)}
+                                            >
+                                                <option value="">— Solo validar (sin guardar veredicto) —</option>
+                                                {documents.map(d => (
+                                                    <option key={d.id} value={d.id}>{d.nombre_documento}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={handleValidateQuality}
+                                        disabled={!docFile || !permit}
+                                        className="flex items-center justify-center gap-2 bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed text-emerald-400 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
+                                    >
+                                        <span className="material-symbols-outlined text-[16px]">verified</span> Validar calidad (RAG)
+                                    </button>
                                 </>
                             )}
 
@@ -1181,6 +1245,81 @@ const ProjectDashboard = () => {
                                     <p className="text-xs text-text-secondary/60">Esto puede tomar unos segundos</p>
                                 </div>
                             )}
+
+                            {/* STEP: validating quality */}
+                            {docStep === 'validating' && (
+                                <div className="flex flex-col items-center justify-center py-12 gap-4">
+                                    <span className="material-symbols-outlined animate-spin text-emerald-400 text-[40px]">progress_activity</span>
+                                    <p className="text-sm text-text-secondary font-semibold">Validando calidad contra la RCA del WBS...</p>
+                                    <p className="text-xs text-text-secondary/60">Validación estructural + análisis semántico (RAG)</p>
+                                </div>
+                            )}
+
+                            {/* STEP: quality verdict */}
+                            {docStep === 'verdict' && qualityVerdict && (() => {
+                                const v = qualityVerdict.veredicto;
+                                const aprobado = v === 'APROBADO';
+                                const conObs = v === 'APROBADO_CON_OBSERVACIONES';
+                                const rechazado = v.startsWith('RECHAZADO');
+                                const palette = aprobado
+                                    ? { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', icon: 'check_circle' }
+                                    : conObs
+                                        ? { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: 'warning' }
+                                        : rechazado
+                                            ? { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: 'cancel' }
+                                            : { bg: 'bg-slate-500/10', border: 'border-slate-500/30', text: 'text-slate-400', icon: 'help' };
+                                const score = qualityVerdict.score_coherencia;
+                                return (
+                                    <>
+                                        <div className={`flex items-start gap-3 ${palette.bg} border ${palette.border} rounded-xl p-4`}>
+                                            <span className={`material-symbols-outlined ${palette.text} text-[22px] flex-shrink-0`}>{palette.icon}</span>
+                                            <div className="flex flex-col gap-1">
+                                                <p className={`text-xs font-black ${palette.text} uppercase tracking-widest`}>{v.replace(/_/g, ' ')}</p>
+                                                {typeof score === 'number' && (
+                                                    <p className="text-xs text-text-secondary">Coherencia con la RCA: <span className="font-bold text-white">{(score * 100).toFixed(0)}%</span></p>
+                                                )}
+                                                {qualityVerdict.observaciones && (
+                                                    <p className="text-xs text-text-secondary mt-1">{qualityVerdict.observaciones}</p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {qualityVerdict.evidencia && qualityVerdict.evidencia.length > 0 && (
+                                            <div className="flex flex-col gap-2">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-text-secondary">Evidencia (cláusulas RCA más cercanas)</p>
+                                                <div className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+                                                    {qualityVerdict.evidencia.slice(0, 5).map((ev, i) => (
+                                                        <div key={i} className="bg-background-dark border border-border-dark rounded-lg px-3 py-2">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <p className="text-[11px] font-bold text-white">{ev.clausula_rca || 'Cláusula RCA'}</p>
+                                                                {typeof ev.similitud === 'number' && (
+                                                                    <span className="text-[10px] text-emerald-400 font-mono">{(ev.similitud * 100).toFixed(0)}%</span>
+                                                                )}
+                                                            </div>
+                                                            {ev.fragmento_doc && <p className="text-[10px] text-text-secondary mt-0.5">{ev.fragmento_doc}</p>}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {validateTargetDocId != null && (
+                                            <div className="text-[11px] flex flex-col gap-0.5">
+                                                <p className={qualityVerdict.persistido ? 'text-emerald-400' : 'text-amber-400'}>
+                                                    {qualityVerdict.persistido
+                                                        ? '✓ Veredicto guardado en el historial del documento.'
+                                                        : `⚠ No se pudo guardar el veredicto${qualityVerdict.persistido_error ? ': ' + qualityVerdict.persistido_error : '.'}`}
+                                                </p>
+                                                {qualityVerdict.notificado && <p className="text-emerald-400">✓ Notificación enviada al responsable del documento.</p>}
+                                            </div>
+                                        )}
+
+                                        <button onClick={resetDocModal} className="text-xs text-text-secondary border border-border-dark px-4 py-2.5 rounded-xl hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">
+                                            Validar otro documento
+                                        </button>
+                                    </>
+                                );
+                            })()}
 
                             {/* STEP: review */}
                             {docStep === 'review' && docAnalysis && (() => {
@@ -1340,71 +1479,214 @@ const ProjectDashboard = () => {
                     <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-4 duration-300">
                         <div className="px-6 py-5 border-b border-border-dark flex items-center justify-between bg-slate-800/20">
                             <div className="flex items-center gap-3">
-                                <span className="material-symbols-outlined text-primary text-[24px]">cloud_download</span>
-                                <h2 className="text-[11px] font-black uppercase tracking-widest text-white">Centro de Descarga de Permisos y Documentos</h2>
+                                <span className="material-symbols-outlined text-primary text-[24px]">cloud_done</span>
+                                <h2 className="text-[11px] font-black uppercase tracking-widest text-white">Centro de Documentos de la Obra</h2>
                             </div>
                             <button onClick={() => setShowDownloads(false)} className="text-text-secondary hover:text-white transition-colors bg-background-dark/50 p-1.5 rounded-lg border border-border-dark hover:border-slate-600">
                                 <span className="material-symbols-outlined text-[18px]">close</span>
                             </button>
                         </div>
                         <div className="p-6 overflow-y-auto flex-1">
-                            <p className="text-xs text-text-secondary/80 mb-8 leading-relaxed font-medium">
-                                Base de datos de los expedientes de permisos que pueden ser descargados con sus respectivas resoluciones, y también las descargas de las guías e instructivos del SEA, Sernageomin y DGA.
+                            <p className="text-xs text-text-secondary/80 mb-6 leading-relaxed font-medium">
+                                Documentos de la obra <span className="text-white font-bold">{projectName}</span>. Al subir un documento, el agente de calidad lo valida automáticamente; si lo aprueba, se almacena de forma segura y queda enlazado a esta obra.
                             </p>
 
-                            <div className="space-y-8">
-                                <div>
-                                    <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest mb-4 flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-[16px] text-primary">folder_open</span>
-                                        Resoluciones de Permisos
-                                    </h3>
+                            {/* ── Subir documento ── */}
+                            <div className="bg-background-dark border border-border-dark rounded-xl p-5 mb-6">
+                                <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest mb-4 flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-[16px] text-emerald-400">upload_file</span>
+                                    Subir documento
+                                </h3>
+
+                                {uploadStep === 'analyzing' ? (
+                                    <div className="flex flex-col items-center justify-center py-8 gap-3">
+                                        <span className="material-symbols-outlined animate-spin text-emerald-400 text-[32px]">progress_activity</span>
+                                        <p className="text-xs text-text-secondary font-semibold">Analizando concordancia con la obra (IA)...</p>
+                                    </div>
+                                ) : uploadStep === 'uploading' ? (
+                                    <div className="flex flex-col items-center justify-center py-8 gap-3">
+                                        <span className="material-symbols-outlined animate-spin text-emerald-400 text-[32px]">progress_activity</span>
+                                        <p className="text-xs text-text-secondary font-semibold">Subiendo y guardando el documento...</p>
+                                    </div>
+                                ) : uploadStep === 'analyzed' && analyzeResult ? (() => {
+                                    const a = analyzeResult;
+                                    const r = a.resultado;
+                                    const palette = r === 'ALTA'
+                                        ? { bg: 'bg-green-500/10', bd: 'border-green-500/30', tx: 'text-green-400', ic: 'check_circle', title: 'Concuerda con la obra' }
+                                        : r === 'DUDOSA'
+                                            ? { bg: 'bg-amber-500/10', bd: 'border-amber-500/30', tx: 'text-amber-400', ic: 'help', title: 'Concordancia dudosa' }
+                                            : r === 'NULA'
+                                                ? { bg: 'bg-red-500/10', bd: 'border-red-500/30', tx: 'text-red-400', ic: 'cancel', title: 'No concuerda con la obra' }
+                                                : r === 'ILEGIBLE'
+                                                    ? { bg: 'bg-red-500/10', bd: 'border-red-500/30', tx: 'text-red-400', ic: 'visibility_off', title: 'Documento ilegible' }
+                                                    : { bg: 'bg-amber-500/10', bd: 'border-amber-500/30', tx: 'text-amber-400', ic: 'warning', title: 'Título de la obra insuficiente' };
+                                    return (
+                                        <div className="flex flex-col gap-3">
+                                            <div className={`flex items-start gap-3 ${palette.bg} border ${palette.bd} rounded-lg p-4`}>
+                                                <span className={`material-symbols-outlined ${palette.tx} text-[20px]`}>{palette.ic}</span>
+                                                <div className="flex flex-col gap-1">
+                                                    <p className={`text-xs font-black ${palette.tx} uppercase tracking-widest`}>{palette.title}</p>
+                                                    {a.titulo_obra && <p className="text-[10px] text-text-secondary/70">Obra: <span className="text-white font-bold">{a.titulo_obra}</span></p>}
+                                                    <p className="text-[11px] text-text-secondary mt-0.5">{a.mensaje}</p>
+                                                    {a.como_solucionar && <p className="text-[11px] text-text-secondary mt-1"><span className="font-bold text-white">Cómo solucionarlo:</span> {a.como_solucionar}</p>}
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-3">
+                                                <button onClick={resetUpload} className="flex items-center gap-1.5 text-[11px] text-text-secondary border border-border-dark px-4 py-2.5 rounded-xl hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">
+                                                    <span className="material-symbols-outlined text-[15px]">arrow_back</span> Cancelar
+                                                </button>
+                                                <button onClick={handleUploadObraDoc} className="flex items-center gap-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors">
+                                                    <span className="material-symbols-outlined text-[15px]">cloud_upload</span> Subir de todas formas
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })() : uploadStep === 'result' && uploadResult ? (() => {
+                                    const r = uploadResult;
+                                    const ok = r.aprobado;
+                                    const palette = ok
+                                        ? (r.advertencia
+                                            ? { bg: 'bg-amber-500/10', bd: 'border-amber-500/30', tx: 'text-amber-400', ic: 'warning' }
+                                            : { bg: 'bg-green-500/10', bd: 'border-green-500/30', tx: 'text-green-400', ic: 'check_circle' })
+                                        : { bg: 'bg-red-500/10', bd: 'border-red-500/30', tx: 'text-red-400', ic: 'cancel' };
+                                    return (
+                                        <div className="flex flex-col gap-3">
+                                            <div className={`flex items-start gap-3 ${palette.bg} border ${palette.bd} rounded-lg p-4`}>
+                                                <span className={`material-symbols-outlined ${palette.tx} text-[20px]`}>{palette.ic}</span>
+                                                <div className="flex flex-col gap-1">
+                                                    <p className={`text-xs font-black ${palette.tx} uppercase tracking-widest`}>
+                                                        {ok ? (r.advertencia ? 'Aprobado con observaciones' : 'Documento aprobado y guardado') : 'Subida rechazada por la IA'}
+                                                    </p>
+                                                    <p className="text-[11px] text-text-secondary">
+                                                        Veredicto: <span className="font-mono">{r.veredicto.replace(/_/g, ' ')}</span>
+                                                        {typeof r.score_coherencia === 'number' ? ` · coherencia con la RCA ${(r.score_coherencia * 100).toFixed(0)}%` : ''}
+                                                    </p>
+                                                    {r.observaciones && <p className="text-[11px] text-text-secondary mt-1">{r.observaciones}</p>}
+                                                    {!ok && <p className="text-[11px] text-red-300 mt-1">El documento no se guardó. Corrige el problema y vuelve a intentarlo.</p>}
+                                                </div>
+                                            </div>
+                                            <button onClick={resetUpload} className="self-start text-[11px] text-text-secondary border border-border-dark px-4 py-2 rounded-lg hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">
+                                                Subir otro documento
+                                            </button>
+                                        </div>
+                                    );
+                                })() : (
+                                    <div className="flex flex-col gap-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div className="flex flex-col gap-1.5">
+                                                <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Categoría</label>
+                                                <select value={uploadCategoria} onChange={e => setUploadCategoria(e.target.value)} className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none w-full">
+                                                    <option value="RCA" className="bg-[#1e293b]">RCA</option>
+                                                    <option value="RESOLUCION" className="bg-[#1e293b]">Resolución</option>
+                                                    <option value="JUNTA_VECINOS" className="bg-[#1e293b]">Acta junta de vecinos</option>
+                                                    <option value="INSTRUCTIVO" className="bg-[#1e293b]">Instructivo</option>
+                                                    <option value="OTRO" className="bg-[#1e293b]">Otro</option>
+                                                </select>
+                                            </div>
+                                            <label className="flex flex-col gap-1.5 cursor-pointer">
+                                                <span className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Archivo (PDF)</span>
+                                                <div className="bg-surface border border-border-dark rounded-lg px-3 py-2 text-xs text-text-secondary hover:border-emerald-500/50 transition-colors flex items-center gap-2 overflow-hidden">
+                                                    <span className="material-symbols-outlined text-[16px] text-text-secondary/60 shrink-0">attach_file</span>
+                                                    <span className="truncate">{uploadFile ? <span className="text-emerald-400 font-bold">{uploadFile.name}</span> : 'Selecciona un PDF...'}</span>
+                                                    <input type="file" accept=".pdf" className="hidden" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <button
+                                            onClick={handleAnalyzeObraDoc}
+                                            disabled={!uploadFile}
+                                            className="self-start flex items-center gap-2 bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed text-emerald-400 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
+                                        >
+                                            <span className="material-symbols-outlined text-[16px]">auto_awesome</span> Analizar documento
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* ── Listado de documentos de la obra ── */}
+                            <div>
+                                <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest mb-4 flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-[16px] text-primary">folder_open</span>
+                                    Documentos de la obra ({obraDocs.length})
+                                </h3>
+                                {obraDocsLoading ? (
+                                    <div className="text-center py-10 text-text-secondary text-xs">
+                                        <span className="material-symbols-outlined animate-spin mr-2 align-middle">progress_activity</span>Cargando documentos...
+                                    </div>
+                                ) : obraDocs.length === 0 ? (
+                                    <div className="bg-background-dark border border-border-dark border-dashed rounded-xl px-6 py-10 text-center text-text-secondary text-xs italic">
+                                        Aún no hay documentos subidos para esta obra.
+                                    </div>
+                                ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        {[1, 2, 3, 4].map(i => (
-                                            <div key={i} className="bg-background-dark border border-border-dark p-4 rounded-xl flex items-center justify-between hover:border-primary/50 hover:bg-slate-800/40 transition-all group cursor-pointer"
-                                                onClick={() => { const a = document.createElement('a'); a.href = '/RCA-MineraAntofagasta.pdf'; a.download = `Resolución Exenta 00${i}.pdf`; a.click(); }}>
-                                                <div className="flex items-center gap-4">
-                                                    <span className="material-symbols-outlined text-red-500 text-[28px] drop-shadow-[0_0_8px_rgba(239,68,68,0.3)]">picture_as_pdf</span>
-                                                    <div className="flex flex-col">
-                                                        <span className="text-[11px] font-bold text-white tracking-wider">Resolución Exenta 00{i}.pdf</span>
-                                                        <span className="text-[10px] text-text-secondary/60 mt-0.5 font-mono">2.4 MB • 12/03/2026</span>
+                                        {obraDocs.map(doc => (
+                                            <div key={doc.id} className="bg-background-dark border border-border-dark p-4 rounded-xl flex items-center justify-between gap-2 hover:border-primary/50 transition-all">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <span className="material-symbols-outlined text-red-500 text-[26px] shrink-0">picture_as_pdf</span>
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-[11px] font-bold text-white truncate">{doc.nombre_archivo}</span>
+                                                        <span className="text-[9px] text-text-secondary/70 mt-0.5">
+                                                            <span className="text-primary/80 font-bold uppercase">{doc.categoria.replace(/_/g, ' ')}</span>
+                                                            {doc.size_bytes ? ` · ${(doc.size_bytes / 1024 / 1024).toFixed(1)} MB` : ''}
+                                                        </span>
                                                     </div>
                                                 </div>
-                                                <span className="material-symbols-outlined text-text-secondary/50 group-hover:text-primary transition-colors text-[20px]">download</span>
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    <a href={obraDocumentDownloadUrl(doc.id)} target="_blank" rel="noopener noreferrer" title="Descargar" className="p-1.5 rounded-lg hover:bg-white/5 text-text-secondary/60 hover:text-primary transition-colors">
+                                                        <span className="material-symbols-outlined text-[20px]">download</span>
+                                                    </a>
+                                                    <button onClick={() => handleDeleteObraDoc(doc.id)} title="Eliminar" className="p-1.5 rounded-lg hover:bg-white/5 text-text-secondary/60 hover:text-red-400 transition-colors">
+                                                        <span className="material-symbols-outlined text-[20px]">delete</span>
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
-                                </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                                <div>
-                                    <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest mb-4 flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-[16px] text-primary">menu_book</span>
-                                        Guías e Instructivos Oficiales
-                                    </h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <div className="bg-background-dark border border-border-dark p-4 rounded-xl flex items-center justify-between hover:border-primary/50 hover:bg-slate-800/40 transition-all group cursor-pointer"
-                                            onClick={() => { const a = document.createElement('a'); a.href = '/RCA-MineraAntofagasta.pdf'; a.download = 'Guía Evaluación SEA.pdf'; a.click(); }}>
-                                            <div className="flex items-center gap-4">
-                                                <span className="material-symbols-outlined text-blue-500 text-[28px] drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]">description</span>
-                                                <div className="flex flex-col">
-                                                    <span className="text-[11px] font-bold text-white tracking-wider">Guía Evaluación SEA.pdf</span>
-                                                    <span className="text-[10px] text-text-secondary/60 mt-0.5 font-mono">5.1 MB • SEA</span>
-                                                </div>
-                                            </div>
-                                            <span className="material-symbols-outlined text-text-secondary/50 group-hover:text-primary transition-colors text-[20px]">download</span>
-                                        </div>
-                                        <div className="bg-background-dark border border-border-dark p-4 rounded-xl flex items-center justify-between hover:border-primary/50 hover:bg-slate-800/40 transition-all group cursor-pointer"
-                                            onClick={() => { const a = document.createElement('a'); a.href = '/RCA-MineraAntofagasta.pdf'; a.download = 'Instructivo Sernageomin.pdf'; a.click(); }}>
-                                            <div className="flex items-center gap-4">
-                                                <span className="material-symbols-outlined text-blue-500 text-[28px] drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]">description</span>
-                                                <div className="flex flex-col">
-                                                    <span className="text-[11px] font-bold text-white tracking-wider">Instructivo Sernageomin.pdf</span>
-                                                    <span className="text-[10px] text-text-secondary/60 mt-0.5 font-mono">1.8 MB • Sernageomin</span>
-                                                </div>
-                                            </div>
-                                            <span className="material-symbols-outlined text-text-secondary/50 group-hover:text-primary transition-colors text-[20px]">download</span>
-                                        </div>
-                                    </div>
+            {/* Modal: Añadir documento requerido a un hito */}
+            {addDocMilestone !== null && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background-dark/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-surface-dark border border-border-dark rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
+                        <div className="px-6 py-5 border-b border-border-dark flex items-center justify-between bg-slate-800/20">
+                            <div className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-emerald-400 text-[24px]">note_add</span>
+                                <h2 className="text-[11px] font-black uppercase tracking-widest text-white">Añadir documento requerido</h2>
+                            </div>
+                            <button onClick={() => { setAddDocMilestone(null); setNewDoc(emptyNewDoc); }} className="text-text-secondary hover:text-white transition-colors bg-background-dark/50 p-1.5 rounded-lg border border-border-dark hover:border-slate-600">
+                                <span className="material-symbols-outlined text-[18px]">close</span>
+                            </button>
+                        </div>
+                        <div className="p-6 flex flex-col gap-4">
+                            <p className="text-xs text-text-secondary leading-relaxed">Documento requerido para este hito. Define su responsable y fecha límite; cuando se marque como entregado avanzará el progreso del hito.</p>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Nombre del documento *</label>
+                                <input value={newDoc.nombre_documento} onChange={e => setNewDoc({ ...newDoc, nombre_documento: e.target.value })} placeholder="Ej: Informe de Línea Base" className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-emerald-500/60 placeholder:text-text-secondary/40 w-full" />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Responsable</label>
+                                    <input value={newDoc.nombre_responsable} onChange={e => setNewDoc({ ...newDoc, nombre_responsable: e.target.value })} className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-emerald-500/60 w-full" />
                                 </div>
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Correo del responsable</label>
+                                    <input value={newDoc.correo_responsable} onChange={e => setNewDoc({ ...newDoc, correo_responsable: e.target.value })} type="email" placeholder="responsable@..." className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-emerald-500/60 placeholder:text-text-secondary/40 w-full" />
+                                </div>
+                                <div className="flex flex-col gap-1.5 md:col-span-2">
+                                    <label className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Fecha límite de entrega</label>
+                                    <input value={newDoc.fecha_entrega} onChange={e => setNewDoc({ ...newDoc, fecha_entrega: e.target.value })} type="date" className="bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-emerald-500/60 w-full" />
+                                </div>
+                            </div>
+                            <div className="flex gap-3 justify-end">
+                                <button onClick={() => { setAddDocMilestone(null); setNewDoc(emptyNewDoc); }} className="text-[11px] text-text-secondary border border-border-dark px-4 py-2.5 rounded-xl hover:border-slate-500 hover:text-white transition-colors font-bold uppercase tracking-widest">Cancelar</button>
+                                <button onClick={() => { if (addDocMilestone !== null) handleAddDoc(addDocMilestone); }} disabled={!newDoc.nombre_documento.trim() || savingDoc} className="flex items-center gap-2 bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed text-emerald-400 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors">
+                                    <span className="material-symbols-outlined text-[15px]">save</span> {savingDoc ? 'Guardando...' : 'Guardar documento'}
+                                </button>
                             </div>
                         </div>
                     </div>

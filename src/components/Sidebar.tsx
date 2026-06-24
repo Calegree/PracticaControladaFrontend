@@ -58,7 +58,7 @@ const Sidebar = () => {
                             }
                         >
                             <span className="material-symbols-outlined text-[16px] text-green-500">verified</span>
-                            <span className="text-sm">Obras Aprobadas</span>
+                            <span className="text-sm">Obras Finalizadas</span>
                         </NavLink>
                         <NavLink
                             to="/predictive"

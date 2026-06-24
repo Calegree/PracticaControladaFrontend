@@ -34,6 +34,7 @@ export interface PermitTramitacion {
     gerencia?: string;
     wbs?: string;
     wbsGroupName?: string;
+    wbsId?: number | null;
 
     // Cols 9–11: Solicitud de Información Legal / Ingeniería
     solicitudInfoLegal: MilestoneDates;
