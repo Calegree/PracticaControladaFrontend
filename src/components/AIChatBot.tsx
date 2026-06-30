@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { generateChatReportPdf } from '../services/pdfReport';
 
 const AIChatBot = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<{ role: string, text: string }[]>([
-        { role: 'model', text: '¡Hola! Soy tu Asistente PMO Inteligente. Puedo enrutar tu consulta automáticamente al agente más experto (PMO, Consultor TI, RSE, Mantenimiento o Calidad Documental), o puedes seleccionar uno manualmente en el menú de arriba. ¿En qué te puedo ayudar hoy?' }
+        { role: 'model', text: '¡Hola! Soy tu Asistente PMO Inteligente. Puedo enrutar tu consulta automáticamente al agente más experto (PMO, HSE, Confiabilidad, Consultor Estratégico o Calidad Documental), o puedes seleccionar uno manualmente en el menú de arriba. También puedo generar informes con datos reales de la base de datos: pídeme, por ejemplo, "genérame un informe del estado de los permisos". ¿En qué te puedo ayudar hoy?' }
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -20,55 +19,6 @@ const AIChatBot = () => {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [messages, isLoading]);
-
-    const downloadPDF = (text: string) => {
-        const doc = new jsPDF();
-        const cleanText = text.replace(/\*\[.*?\]\*\n\n/, ''); // Quitar el prefijo del agente
-        
-        doc.setFontSize(16);
-        doc.setTextColor(19, 91, 236); // Color primario #135bec
-        doc.text('Informe de Gestión - Goldfields PMO', 20, 20);
-        
-        doc.setFontSize(10);
-        doc.setTextColor(100);
-        doc.text(`Fecha: ${new Date().toLocaleString()}`, 20, 30);
-        
-        const sections = cleanText.split('\n\n');
-        let currentY = 40;
-
-        sections.forEach((section) => {
-            if (section.includes('|')) {
-                // Es una tabla
-                const rows = section.trim().split('\n');
-                const headers = rows[0].split('|').filter(h => h.trim()).map(h => h.trim());
-                const data = rows.slice(2).map(row => row.split('|').filter(c => c.trim()).map(c => c.trim()));
-                
-                autoTable(doc, {
-                    head: [headers],
-                    body: data,
-                    startY: currentY,
-                    theme: 'grid',
-                    headStyles: { fillColor: [26, 34, 51], textColor: [255, 255, 255] },
-                    alternateRowStyles: { fillColor: [245, 245, 245] },
-                    styles: { fontSize: 8 }
-                });
-                currentY = (doc as any).lastAutoTable.finalY + 10;
-            } else if (section.trim()) {
-                // Es texto plano o títulos
-                const textLines = doc.splitTextToSize(section.trim().replace(/[#*]/g, ''), 170);
-                if (currentY + (textLines.length * 5) > 280) {
-                    doc.addPage();
-                    currentY = 20;
-                }
-                doc.setFontSize(section.startsWith('#') ? 12 : 10);
-                doc.setTextColor(section.startsWith('#') ? 0 : 60);
-                doc.text(textLines, 20, currentY);
-                currentY += (textLines.length * 5) + 5;
-            }
-        });
-
-        doc.save(`Informe_PMO_${new Date().getTime()}.pdf`);
-    };
 
     const handleSendMessage = async () => {
         if (!input.trim() || isLoading) return;
@@ -156,13 +106,16 @@ const AIChatBot = () => {
                                             {msg.text.replace(/\\n/g, '\n')}
                                         </ReactMarkdown>
                                     </div>
-                                    {msg.role === 'model' && msg.text.includes('|') && (
-                                        <button 
-                                            onClick={() => downloadPDF(msg.text)}
+                                    {msg.role === 'model' && i > 0 && (
+                                        <button
+                                            onClick={() => generateChatReportPdf(
+                                                msg.text.replace(/^\*\[.*?\]\*\n\n/, ''),
+                                                { agent: (msg.text.match(/^\*\[Respondiendo desde ([^·\]]+)/)?.[1] || '').trim() }
+                                            )}
                                             className="mt-3 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-[9px] uppercase tracking-wider font-bold py-1.5 px-3 rounded-lg border border-white/10 transition-colors"
                                         >
                                             <span className="material-symbols-outlined text-sm">picture_as_pdf</span>
-                                            Descargar Informe PDF
+                                            Crear informe PDF
                                         </button>
                                     )}
                                 </div>
