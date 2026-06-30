@@ -1,16 +1,28 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { loginUser } from '../services/api';
 
 const Login = () => {
     const navigate = useNavigate();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        // Skip auth logic for UI mockup
-        navigate('/');
+        setError(null);
+        setLoading(true);
+        try {
+            const user = await loginUser(email, password);
+            localStorage.setItem('currentUser', JSON.stringify(user));
+            navigate('/');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Error al iniciar sesión.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -75,12 +87,21 @@ const Login = () => {
                         </Link>
                     </div>
 
+                    {/* Error message */}
+                    {error && (
+                        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-lg px-3 py-2.5 flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[16px]">error</span>
+                            {error}
+                        </div>
+                    )}
+
                     {/* Submit Button */}
                     <button
                         type="submit"
-                        className="w-full bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold py-3 px-4 rounded-lg transition-colors text-sm shadow-[0_4px_14px_0_rgba(59,130,246,0.39)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)]"
+                        disabled={loading}
+                        className="w-full bg-[#3b82f6] hover:bg-[#2563eb] disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors text-sm shadow-[0_4px_14px_0_rgba(59,130,246,0.39)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)]"
                     >
-                        Iniciar sesión
+                        {loading ? 'Ingresando...' : 'Iniciar sesión'}
                     </button>
                 </form>
 

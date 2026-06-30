@@ -7,6 +7,12 @@ const Sidebar = () => {
     const { theme, toggleTheme } = useTheme();
     const isDark = theme === 'dark';
 
+    // Usuario actual (guardado en login). La administración de usuarios es solo para administradores.
+    const currentUser = (() => {
+        try { return JSON.parse(localStorage.getItem('currentUser') || 'null'); } catch { return null; }
+    })();
+    const isAdmin = currentUser?.rol === 'administrador';
+
     return (
         <div className="w-64 bg-background-dark h-full text-white flex flex-col transition-all duration-300 border-r border-border-dark">
             <div className="h-16 flex items-center px-6 border-b border-border-dark">
@@ -77,6 +83,27 @@ const Sidebar = () => {
                         </NavLink> */}
                     </div>
                 </div>
+
+                {/* Administración (solo administradores) */}
+                {isAdmin && (
+                    <div className="pt-4 pb-1">
+                        <p className="px-3 text-[10px] font-black uppercase text-text-secondary tracking-widest mb-2">Administración</p>
+                        <div className="space-y-1">
+                            <NavLink
+                                to="/users"
+                                className={({ isActive }) =>
+                                    `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${isActive
+                                        ? "bg-primary/20 text-white font-medium border border-primary/30"
+                                        : "text-text-secondary hover:bg-surface-dark-lighter hover:text-white"
+                                    }`
+                                }
+                            >
+                                <span className="material-symbols-outlined text-[16px] text-purple-400">manage_accounts</span>
+                                <span className="text-sm">Administrar Usuarios</span>
+                            </NavLink>
+                        </div>
+                    </div>
+                )}
             </nav>
 
             <div className="mt-auto p-6 border-t border-border-dark space-y-3">

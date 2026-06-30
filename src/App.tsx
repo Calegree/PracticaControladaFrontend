@@ -13,6 +13,7 @@ import Calendar from './pages/Calendar';
 import ActiveProjects from './pages/ActiveProjects';
 import HistoricalProjects from './pages/HistoricalProjects';
 import PredictiveAnalysis from './pages/PredictiveAnalysis';
+import Users from './pages/Users';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
@@ -34,6 +35,7 @@ function App() {
           <Route path="active-projects" element={<ActiveProjects />} />
           <Route path="historical-projects" element={<HistoricalProjects />} />
           <Route path="predictive" element={<PredictiveAnalysis />} />
+          <Route path="users" element={<Users />} />
           <Route path="gantt" element={<Gantt />} />
           <Route path="commitments" element={<Commitments />} />
           <Route path="calendar" element={<Calendar />} />

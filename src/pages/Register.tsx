@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { registerUser, type UserRole } from '../services/api';
 
 const Register = () => {
     const navigate = useNavigate();
@@ -7,13 +8,28 @@ const Register = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [rol, setRol] = useState<UserRole>('tecnico');
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
 
-    const handleRegister = (e: React.FormEvent) => {
+    const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
-        // Skip auth logic for UI mockup
-        navigate('/login');
+        setError(null);
+        if (password !== confirmPassword) {
+            setError('Las contraseñas no coinciden.');
+            return;
+        }
+        setLoading(true);
+        try {
+            await registerUser(name, email, password, rol);
+            navigate('/login');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Error al crear la cuenta.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -108,14 +124,35 @@ const Register = () => {
                         </div>
                     </div>
 
-                    <div className="h-2"></div>
+                    {/* Role Field */}
+                    <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-white">Tipo de usuario</label>
+                        <select
+                            value={rol}
+                            onChange={(e) => setRol(e.target.value as UserRole)}
+                            className="bg-[#131924] border border-[#263145] text-white rounded-lg px-4 py-3 text-sm outline-none transition-all focus:border-blue-500/50 focus:bg-[#1a2130]"
+                        >
+                            <option value="tecnico" className="bg-[#1a2130]">Técnico</option>
+                            <option value="gerente" className="bg-[#1a2130]">Gerente</option>
+                            <option value="administrador" className="bg-[#1a2130]">Administrador</option>
+                        </select>
+                    </div>
+
+                    {/* Error message */}
+                    {error && (
+                        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-lg px-3 py-2.5 flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[16px]">error</span>
+                            {error}
+                        </div>
+                    )}
 
                     {/* Submit Button */}
                     <button
                         type="submit"
-                        className="w-full bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold py-3 px-4 rounded-lg transition-colors text-sm shadow-[0_4px_14px_0_rgba(59,130,246,0.39)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)]"
+                        disabled={loading}
+                        className="w-full bg-[#3b82f6] hover:bg-[#2563eb] disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors text-sm shadow-[0_4px_14px_0_rgba(59,130,246,0.39)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)]"
                     >
-                        Registrarse
+                        {loading ? 'Creando cuenta...' : 'Registrarse'}
                     </button>
                 </form>
 

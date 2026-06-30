@@ -440,3 +440,47 @@ export async function saveDocumentos(
     }
     return { guardados, errores };
 }
+
+// ─── Usuarios / Autenticación ───────────────────────────────────────────────
+
+export type UserRole = 'administrador' | 'gerente' | 'tecnico';
+
+export interface User {
+    id: number;
+    nombre: string;
+    email: string;
+    rol: UserRole;
+    is_active: boolean;
+    created_at: string;
+    last_login: string | null;
+}
+
+async function postJson<T>(path: string, body: unknown, method: 'POST' | 'PATCH' = 'POST'): Promise<T> {
+    const res = await fetch(`${BASE}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        let detail = `Error ${res.status}`;
+        try { const j = await res.json(); if (j?.detail) detail = j.detail; } catch { /* ignore */ }
+        throw new Error(detail);
+    }
+    return res.json();
+}
+
+export async function loginUser(email: string, password: string): Promise<User> {
+    return postJson<User>('/auth/login', { email, password });
+}
+
+export async function registerUser(nombre: string, email: string, password: string, rol: UserRole = 'tecnico'): Promise<User> {
+    return postJson<User>('/auth/register', { nombre, email, password, rol });
+}
+
+export async function fetchUsers(): Promise<User[]> {
+    return apiFetch<User[]>('/users');
+}
+
+export async function setUserActive(userId: number, isActive: boolean): Promise<User> {
+    return postJson<User>(`/users/${userId}/active`, { is_active: isActive }, 'PATCH');
+}
