@@ -20,6 +20,9 @@ export const EMPTY_PERMIT: PermitFieldsValue = {
 const inputCls = "bg-surface border border-border-dark text-white rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/60 placeholder:text-text-secondary/40 w-full";
 const lblCls = "text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1";
 
+// Macrozonas válidas de la faena (valores fijos del dato real).
+const MACROZONAS = ['Faena Salares Norte', 'Mina-Planta', 'Campamento', 'Off-Site', 'Suministro hídrico'];
+
 const PermitFields = ({ value, onChange, autoridadOptions, contratistaOptions }: {
     value: PermitFieldsValue;
     onChange: (v: PermitFieldsValue) => void;
@@ -36,14 +39,6 @@ const PermitFields = ({ value, onChange, autoridadOptions, contratistaOptions }:
                 <input value={value.codigo_aconex} onChange={e => set({ codigo_aconex: e.target.value })} placeholder="GFSN01-DD-LE-..." className={`${inputCls} font-mono`} />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                    <label className={lblCls}>Tipo de permiso</label>
-                    <input value={value.tipo_permiso} onChange={e => set({ tipo_permiso: e.target.value })} className={inputCls} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                    <label className={lblCls}>Permiso aplicable</label>
-                    <input value={value.permiso_aplicable} onChange={e => set({ permiso_aplicable: e.target.value })} className={inputCls} />
-                </div>
                 <div className="flex flex-col gap-1.5">
                     <label className={lblCls}>Autoridad</label>
                     <select value={value.autoridad} onChange={e => set({ autoridad: e.target.value })} className={inputCls}>
@@ -74,7 +69,10 @@ const PermitFields = ({ value, onChange, autoridadOptions, contratistaOptions }:
                 </div>
                 <div className="flex flex-col gap-1.5 md:col-span-2">
                     <label className={lblCls}>Macrozona</label>
-                    <input value={value.macrozona} onChange={e => set({ macrozona: e.target.value })} placeholder="Ej: Mina-Planta" className={inputCls} />
+                    <select value={value.macrozona} onChange={e => set({ macrozona: e.target.value })} className={inputCls}>
+                        <option value="" className="bg-[#1e293b]">—</option>
+                        {MACROZONAS.map(m => <option key={m} value={m} className="bg-[#1e293b]">{m}</option>)}
+                    </select>
                 </div>
             </div>
         </div>

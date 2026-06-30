@@ -282,12 +282,13 @@ const ProjectDashboard = () => {
             .finally(() => setObraDocsLoading(false));
     }, [showDownloads, permit?.id]);
 
-    const handleAnalyzeObraDoc = async () => {
-        if (!uploadFile || !permit?.id) return;
+    const handleAnalyzeObraDoc = async (fileArg?: File) => {
+        const file = fileArg ?? uploadFile;
+        if (!file || !permit?.id) return;
         setUploadStep('analyzing');
         setAnalyzeResult(null);
         try {
-            const result = await analyzeObraDocument(uploadFile, permit.id);
+            const result = await analyzeObraDocument(file, permit.id);
             setAnalyzeResult(result);
             setUploadStep('analyzed');
         } catch (e: unknown) {
@@ -435,15 +436,14 @@ const ProjectDashboard = () => {
                         </div>
                     </div>
                     <div className="flex items-center gap-3 self-start lg:self-auto">
-                        <button
-                            onClick={() => { setShowRCAModal(true); resetDocModal(); }}
-                            className="bg-[#8b5cf6]/10 border border-[#8b5cf6]/30 hover:bg-[#8b5cf6]/20 text-[#8b5cf6] px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm transition-colors h-fit flex items-center gap-1.5"
-                        >
-                            <span className="material-symbols-outlined text-[16px]">upload_file</span> Subir Listado de Documentos
-                        </button>
-                        <button className="bg-primary/10 border border-primary/30 hover:bg-primary/20 text-primary px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm transition-colors h-fit">
-                            Externos
-                        </button>
+                        {/* Label de Macrozona (reemplaza al antiguo botón "Subir Listado de Documentos") */}
+                        <div className="bg-surface-dark border border-border-dark px-5 py-2 rounded-xl h-fit flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[16px] text-primary">map</span>
+                            <div className="flex flex-col leading-tight">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-text-secondary">Macrozona</span>
+                                <span className="text-xs font-bold text-white">{permit?.macrozona || '—'}</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1128,7 +1128,7 @@ const ProjectDashboard = () => {
 
 
                     {/* LAST SECTION: Descargas y Notificaciones */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
+                    <div className="grid grid-cols-1 gap-6 pb-6">
                         {/* Centro de descargas */}
                         <div className="bg-surface-dark rounded-xl shadow-sm border border-border-dark p-6 md:p-8 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors">
                             <span className="material-symbols-outlined text-[32px] text-primary/50 mb-4">folder_special</span>
@@ -1144,8 +1144,10 @@ const ProjectDashboard = () => {
                             </button>
                         </div>
 
-                        {/* Notificaciones */}
-                        <div className="bg-surface-dark rounded-xl shadow-sm border border-border-dark p-6 md:p-8 flex flex-col items-center justify-center text-center hover:border-text-secondary/50 transition-colors">
+                        {/* Notificaciones / Configurar alertas por correo: oculto temporalmente de la vista de detalle.
+                            NO BORRAR — el modal de notificaciones (showNotifications) sigue existiendo en el código.
+                            Para reactivarlo, descomentar este bloque y volver la grilla de arriba a "md:grid-cols-2". */}
+                        {/* <div className="bg-surface-dark rounded-xl shadow-sm border border-border-dark p-6 md:p-8 flex flex-col items-center justify-center text-center hover:border-text-secondary/50 transition-colors">
                             <span className="material-symbols-outlined text-[32px] text-text-secondary/50 mb-4">notifications_active</span>
                             <h2 className="text-sm font-black text-white leading-relaxed mb-4">
                                 ¿Deseas recibir notificaciones sobre <br />
@@ -1158,7 +1160,7 @@ const ProjectDashboard = () => {
                                 <span className="material-symbols-outlined text-[18px]">campaign</span>
                                 Configurar alertas
                             </button>
-                        </div>
+                        </div> */}
                     </div>
                 </div>
             </div>
@@ -1587,18 +1589,19 @@ const ProjectDashboard = () => {
                                                 <span className="text-[9px] font-black text-text-secondary uppercase tracking-widest ml-1">Archivo (PDF)</span>
                                                 <div className="bg-surface border border-border-dark rounded-lg px-3 py-2 text-xs text-text-secondary hover:border-emerald-500/50 transition-colors flex items-center gap-2 overflow-hidden">
                                                     <span className="material-symbols-outlined text-[16px] text-text-secondary/60 shrink-0">attach_file</span>
-                                                    <span className="truncate">{uploadFile ? <span className="text-emerald-400 font-bold">{uploadFile.name}</span> : 'Selecciona un PDF...'}</span>
-                                                    <input type="file" accept=".pdf" className="hidden" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
+                                                    <span className="truncate">{uploadFile ? <span className="text-emerald-400 font-bold">{uploadFile.name}</span> : 'Selecciona un PDF y la IA lo analizará automáticamente...'}</span>
+                                                    <input type="file" accept=".pdf" className="hidden" onChange={e => {
+                                                        const f = e.target.files?.[0] ?? null;
+                                                        setUploadFile(f);
+                                                        if (f) handleAnalyzeObraDoc(f);  // análisis automático al subir
+                                                    }} />
                                                 </div>
                                             </label>
                                         </div>
-                                        <button
-                                            onClick={handleAnalyzeObraDoc}
-                                            disabled={!uploadFile}
-                                            className="self-start flex items-center gap-2 bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed text-emerald-400 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
-                                        >
-                                            <span className="material-symbols-outlined text-[16px]">auto_awesome</span> Analizar documento
-                                        </button>
+                                        <p className="text-[10px] text-text-secondary/70 flex items-center gap-1.5">
+                                            <span className="material-symbols-outlined text-[14px] text-emerald-400">auto_awesome</span>
+                                            Al seleccionar un PDF, el Agente IA analiza automáticamente su concordancia con la obra.
+                                        </p>
                                     </div>
                                 )}
                             </div>

@@ -31,6 +31,7 @@ export interface PermitTramitacion {
     autoridad: string;
     contratistaResponsable: string;
     origenPermiso?: string | null;
+    macrozona?: string | null;
     gerencia?: string;
     wbs?: string;
     wbsGroupName?: string;

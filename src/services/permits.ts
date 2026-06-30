@@ -122,6 +122,7 @@ function basePermit(p: ApiPermitListItem): PermitTramitacion {
         autoridad: p.autoridad ?? '',
         contratistaResponsable: p.contratista_responsable ?? '',
         origenPermiso: p.origen_permiso ?? null,
+        macrozona: p.macrozona ?? null,
         gerencia: p.gerencia ?? undefined,
         wbs: p.wbs_item?.nombre_wbs ?? p.wbs_item?.wbs_name ?? undefined,
         wbsGroupName: p.wbs_item?.wbs_name ?? undefined,

@@ -60,7 +60,10 @@ const Sidebar = () => {
                             <span className="material-symbols-outlined text-[16px] text-green-500">verified</span>
                             <span className="text-sm">Obras Finalizadas</span>
                         </NavLink>
-                        <NavLink
+                        {/* Análisis Predictivo: oculto temporalmente de la sidebar (módulo aún no funcional).
+                            NO BORRAR — la ruta /predictive y la página siguen existiendo; solo se oculta el acceso.
+                            Para reactivarlo, descomentar este bloque. */}
+                        {/* <NavLink
                             to="/predictive"
                             className={({ isActive }) =>
                                 `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${isActive
@@ -71,7 +74,7 @@ const Sidebar = () => {
                         >
                             <span className="material-symbols-outlined text-[16px] text-purple-400">auto_awesome</span>
                             <span className="text-sm">Análisis Predictivo</span>
-                        </NavLink>
+                        </NavLink> */}
                     </div>
                 </div>
             </nav>
